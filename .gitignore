@@ -1,0 +1,26 @@
+# Environment variables & Secrets
+.env
+*.session
+*.session-journal
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Runtime data & Personal chat history
+contacts.json
+history.json
+autoreply_state.json
+status.json
+todos.json
+action_history.json
+intelligence_state.json
+intelligence_seen.json
+intelligence_preferences.json
+
+# Backup / Archive files
+*.zip
+*.tar.gz
+*.bak
