@@ -132,7 +132,11 @@ Quyidagi Telegram postini tahlil qil va faqat JSON qaytar:
             else:
                 print("[ANALYZER] AI javobi JSON ga aylanmadi")
         elif "error" in data:
-            print("[ANALYZER GROQ XATO]:", data["error"].get("message"))
+            err_msg = data["error"].get("message", "")
+            print("[ANALYZER GROQ XATO]:", err_msg)
+            if "rate limit" in err_msg.lower() or data["error"].get("code") == "rate_limit_exceeded":
+                import time
+                time.sleep(5)
     except Exception as e:
         print("[ANALYZER] Groq chaqiruvida xatolik:", e)
 

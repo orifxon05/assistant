@@ -30,7 +30,7 @@ if [ -d ".git" ]; then
     fi
 fi
 
-# 2. Agar .git bo'lmasa yoki git xatolik bersa (to'g'ridan-to'g'ri repo klon qilish orqali):
+# 2. Agar .git bo'lmasa yoki git xatolik bersa:
 if [ "$UPDATED" -eq 0 ]; then
     echo "📡 Repositoriyadan to'g'ridan-to'g'ri yangilanishlar yuklanmoqda: $REPO_URL ..."
     TMP_DIR=$(mktemp -d)
@@ -50,6 +50,27 @@ if [ "$UPDATED" -eq 0 ]; then
     else
         rm -rf "$TMP_DIR"
     fi
+fi
+
+# 2.1 Agar GitHub'dan olinmasa, mahalliy jarvis_update.zip qidirish:
+if [ "$UPDATED" -eq 0 ]; then
+    for z in "jarvis_update.zip" "../jarvis_update.zip" "$HOME/storage/downloads/jarvis_update.zip" "$HOME/downloads/jarvis_update.zip"; do
+        if [ -f "$z" ]; then
+            echo "📦 Topilgan '$z' faylidan yangilanmoqda..."
+            unzip -o "$z" -x ".env" "*.session*" "history.json" "contacts.json" "profile.json" 2>/dev/null
+            echo "✅ Zip faylidan muvaffaqiyatli yangilandi!"
+            UPDATED=1
+            break
+        fi
+    done
+fi
+
+if [ "$UPDATED" -eq 0 ]; then
+    echo "⚠️ DIQQAT: GitHub'dan kodlarni yuklab bo'lmadi!"
+    echo "Mumkin bo'lgan sabablar:"
+    echo " 1. GitHub repozitoriyangiz 'Private' (yopiq) holatda. Uni GitHub sozlamalaridan 'Public' qiling."
+    echo " 2. Yoki telefoningizga 'jarvis_update.zip' faylini tashlab qayta ishga tushiring."
+    echo " 3. Yoki Internet ulanishini tekshiring."
 fi
 
 # 3. Zaxiradan shaxsiy ma'lumotlarni qayta tiklash:
