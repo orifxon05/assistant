@@ -339,7 +339,8 @@ def build_menu_keyboard():
                 {"text": "\U0001f514 Bildirishnomalar", "callback_data": "quick_notifications"}
             ],
             [
-                {"text": "\U0001f6e1 2FA holati", "callback_data": "quick_2fa"}
+                {"text": "\U0001f6e1 2FA holati", "callback_data": "quick_2fa"},
+                {"text": "🔄 Yangilash (GitHub)", "callback_data": "trigger_ota_update"}
             ]
         ]
     }
@@ -2696,10 +2697,58 @@ def get_updates(offset=None):
         print(f"[POLLING TARMOQ KUTILMOQDA]: {e}")
         return {"ok": False, "error": str(e)}
 
+async def perform_system_update_action(chat_id):
+    send_message(chat_id, "🔄 <b>GitHub'dan yangilanishlar tekshirilmoqda...</b>\n\nIltimos, biroz kuting. Tizim fayllari toza va konfliktsiz (zero-conflict) sinxronlanmoqda...", parse_mode="HTML")
+
+    import subprocess
+    import sys
+    import os
+
+    repo_dir = os.path.dirname(os.path.abspath(__file__))
+    update_sh = os.path.join(repo_dir, "update.sh")
+
+    if os.name != 'nt' and os.path.exists(update_sh):
+        cmd = f"bash \"{update_sh}\""
+    else:
+        cmd = 'git remote set-url origin https://github.com/orifxon05/assistant.git && git fetch origin main && git reset --hard origin/main && pip install -r requirements.txt --upgrade'
+
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            cwd=repo_dir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        out_text = (stdout.decode(errors="ignore") + "\n" + stderr.decode(errors="ignore")).strip()
+        print(f"[SYSTEM UPDATE OUTPUT]:\n{out_text}")
+
+        compile_res = subprocess.run([sys.executable, "-m", "py_compile", "bot.py"], cwd=repo_dir, capture_output=True, text=True)
+        if compile_res.returncode != 0:
+            send_message(chat_id, f"⚠️ <b>Yangilanishda xatolik yuz berdi!</b>\n\nSintaksis xatosi:\n<code>{compile_res.stderr[:400]}</code>", parse_mode="HTML")
+            return
+
+        send_message(chat_id, "🎉 <b>YANGILANISH MUVAFFAQIYATLI YAKUNLANDI!</b>\n\nGitHub'dagi barcha yangi imkoniyatlar yuklandi.\nBot yangi versiya bilan qayta ishga tushmoqda (1-2 soniya)...", parse_mode="HTML")
+        await asyncio.sleep(2)
+
+        try:
+            if telethon_client.is_connected():
+                await telethon_client.disconnect()
+        except Exception:
+            pass
+
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception as e:
+        send_message(chat_id, f"❌ Yangilanish jarayonida xatolik yuz berdi:\n<code>{str(e)}</code>", parse_mode="HTML")
+
 async def handle_callback(callback_query):
     chat_id = callback_query["message"]["chat"]["id"]
     data = callback_query["data"]
     answer_callback(callback_query["id"])
+
+    if data == "trigger_ota_update":
+        asyncio.create_task(perform_system_update_action(chat_id))
+        return
 
     # ─── ONBOARDING VA INTELLIGENCE FEEDBACK CALLBACKS ──────────────
     if data.startswith("ob_"):
@@ -3166,6 +3215,10 @@ async def bot_polling_loop():
                             res = await analyze_channels_recent_posts_action(hours=24)
                             send_message(ADMIN_ID, res)
                         asyncio.create_task(_do_analysis_cmd())
+                        continue
+
+                    if normalized in ["/update", "update", "/yangila", "yangila"]:
+                        asyncio.create_task(perform_system_update_action(chat_id))
                         continue
 
                     if normalized in ["/menu", "/start", "menyu", "menu", "/menyu"]:

@@ -24,3 +24,4 @@ intelligence_preferences.json
 *.zip
 *.tar.gz
 *.bak
+.update_backup/
