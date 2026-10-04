@@ -115,6 +115,10 @@ QAT'IY QOIDALAR:
    - Shaxsiy profilni tahrirlash/o'zgartirish menyusi -> 'edit_personal_profile'
    - Shaxsiy profilga yangi qiziqish yoki texnologiya qo'shish -> 'add_personal_interest'
    - Shaxsiy profildan qiziqishni olib tashlash/o'chirish -> 'remove_personal_interest'
+   - Shaxsiy vaqt jadvalini ko'rish/ko'rsatish (uydan chiqish, o'qish/ish, yo'l, qaytish, bo'sh vaqt) -> 'show_personal_schedule'
+   - Bugun qachon bo'sh ekanligini va hozirgi bandlik holatini tekshirish -> 'get_today_free_time'
+   - Shaxsiy vaqt jadvalini o'zgartirish/sozlash -> 'edit_personal_schedule'
+   - Vakansiya ish vaqtini foydalanuvchi jadvali bilan solishtirish -> 'check_job_schedule'
  7. HECH QACHON RAD ETMA:
    - {name} Telegram ichidagi biror ish qilishni buyursa, HECH QACHON "Men buni qila olmayman", "Bu funksiya mavjud emas", "Bu imkonsiz" kabi rad javoblarni berma!
    - Agar {name} "kanallarni tahlil qil", "24 soat ichida yozilgan postlardan manfaatlisini tashla" kabi topshiriq bersa -> DARHOL 'analyze_channels_recent_posts' funksiyasini chaqir!
@@ -352,6 +356,10 @@ def build_menu_keyboard():
                 {"text": "🎯 Qiziqishlar testi", "callback_data": "pt_start_test"}
             ],
             [{"text": f"\U0001f3af Filtr: {mode_label}", "callback_data": "open_filter"}],
+            [
+                {"text": "🗓 Vaqt jadvalim", "callback_data": "sc_view"},
+                {"text": "⏳ Qachon bo'shman?", "callback_data": "sc_free_today"}
+            ],
             [
                 {"text": "📋 Shaxsiy profilim", "callback_data": "pt_view_profile"},
                 {"text": "📂 Intelligence holati", "callback_data": "quick_intel"}
@@ -1783,6 +1791,36 @@ def remove_personal_interest_action(item_name=None, chat_id=None):
         send_message(target_id, text, kb, parse_mode="HTML")
         return "O'chirmoqchi bo'lgan qiziqishingizni tanlang yoki nomini yozing."
 
+def show_personal_schedule_action(chat_id=None):
+    from personal_schedule import load_schedule, format_schedule_view, build_schedule_action_keyboard
+    target_id = chat_id or ADMIN_ID
+    sched = load_schedule()
+    text = format_schedule_view(sched)
+    kb = build_schedule_action_keyboard()
+    send_message(target_id, text, kb, parse_mode="HTML")
+    return "Shaxsiy vaqt jadvalingiz yuqorida ko'rsatildi."
+
+def get_today_free_time_action(chat_id=None):
+    from personal_schedule import get_today_free_time_info
+    target_id = chat_id or ADMIN_ID
+    text, kb = get_today_free_time_info()
+    send_message(target_id, text, kb, parse_mode="HTML")
+    return "Bugungi bo'sh vaqt va holatingiz yuqorida tahlil qilib berildi."
+
+def edit_personal_schedule_action(chat_id=None):
+    from personal_schedule import get_edit_menu_text_and_keyboard
+    target_id = chat_id or ADMIN_ID
+    text, kb = get_edit_menu_text_and_keyboard()
+    send_message(target_id, text, kb, parse_mode="HTML")
+    return "Jadvalni o'zgartirish menyusi ochildi."
+
+def check_job_schedule_action(job_start_time, job_end_time, job_days=None, is_remote=False, chat_id=None):
+    from personal_schedule import check_job_schedule_match
+    target_id = chat_id or ADMIN_ID
+    res = check_job_schedule_match(job_start_time, job_end_time, job_days, is_remote)
+    send_message(target_id, res["summary_uz"], parse_mode="HTML")
+    return res["summary_uz"]
+
 async def analyze_channels_recent_posts_action(hours=24):
     from datetime import datetime, timedelta, timezone
     from intelligence.sources import get_intelligence_folder_peers
@@ -2224,7 +2262,27 @@ tools = [
         "description": "Foydalanuvchi profilidan biror qiziqish yoki texnologiyani olib tashlaydi/o'chiradi",
         "parameters": {"type": "object", "properties": {
             "item_name": {"type": "string", "description": "O'chiriladigan qiziqish nomi"}
-        }}}}
+        }}}},
+    {"type": "function", "function": {
+        "name": "show_personal_schedule",
+        "description": "Foydalanuvchining shaxsiy vaqt jadvalini (uydan chiqish, o'qish/ish, yo'l, uyga qaytish, bo'sh vaqt, dam olish) ko'rsatadi",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "get_today_free_time",
+        "description": "Bugun qachon bo'sh ekanligini, bo'sh soatlarni va ayni vaqtdagi bandlik statusini ko'rsatadi",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "edit_personal_schedule",
+        "description": "Foydalanuvchining shaxsiy vaqt jadvalini o'zgartirish menyusini ochadi",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "check_job_schedule",
+        "description": "Vakansiya ish vaqtini foydalanuvchi jadvali bilan solishtirib, to'qnashuvlar va moslik darajasini tekshiradi",
+        "parameters": {"type": "object", "properties": {
+            "job_start_time": {"type": "string", "description": "Vakansiya ish boshlanish vaqti (masalan '09:00', '14:00')"},
+            "job_end_time": {"type": "string", "description": "Vakansiya ish tugash vaqti (masalan '18:00', '19:00')"},
+            "is_remote": {"type": "boolean", "description": "Masofaviy ish (remote) ekanligi (standart: false)"}
+        }, "required": ["job_start_time", "job_end_time"]}}}
 ]
 
 def call_groq(messages, use_tools=True, temperature=0.7):
@@ -2455,6 +2513,14 @@ async def get_ai_response(chat_id, user_text):
             func_result = add_personal_interest_action(chat_id=chat_id, **func_args)
         elif func_name == "remove_personal_interest":
             func_result = remove_personal_interest_action(chat_id=chat_id, **func_args)
+        elif func_name == "show_personal_schedule":
+            func_result = show_personal_schedule_action(chat_id)
+        elif func_name == "get_today_free_time":
+            func_result = get_today_free_time_action(chat_id)
+        elif func_name == "edit_personal_schedule":
+            func_result = edit_personal_schedule_action(chat_id)
+        elif func_name == "check_job_schedule":
+            func_result = check_job_schedule_action(chat_id=chat_id, **func_args)
 
         # ─── YANGI CONFIRM KERAK BO'LGAN FUNKSIYALAR ────────────────
         elif func_name == "request_update_name":
@@ -3004,6 +3070,14 @@ async def handle_callback(callback_query):
             send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
         return
 
+    # ─── SHAXSIY VAQT JADVALI CALLBACKS ────────────────────────────
+    if data.startswith("sc_"):
+        from personal_schedule import handle_schedule_callback
+        reply_txt, reply_kb = handle_schedule_callback(chat_id, data)
+        if reply_txt:
+            send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
+        return
+
     # ─── ONBOARDING VA INTELLIGENCE FEEDBACK CALLBACKS ──────────────
     if data.startswith("ob_"):
         from intelligence.onboarding import handle_onboarding_callback
@@ -3461,6 +3535,20 @@ async def bot_polling_loop():
                         print(f"RAD ETILDI (admin emas): {chat_id} -> {text}")
                         send_message(chat_id, "Kechirasiz, bu shaxsiy yordamchi bot va faqat egasi uchun ishlaydi.")
                         continue
+
+                    # ─── AGAR JADVAL SOZLASH JARAYONIDA BO'LSA ─────────────
+                    from personal_schedule import is_in_schedule_setup, process_schedule_input, cancel_schedule_setup
+                    if is_in_schedule_setup(chat_id):
+                        norm_check = text.strip().lower()
+                        if norm_check in ["bekor qilish", "/cancel", "cancel", "bekor"]:
+                            cancel_schedule_setup(chat_id)
+                            send_message(chat_id, "❌ Jadval kiritish bekor qilindi.", {"inline_keyboard": [[{"text": "🗓 Jadvalimni ko'rsat", "callback_data": "sc_view"}]]})
+                            continue
+                        ans_text, ans_kb = process_schedule_input(chat_id, text)
+                        if ans_text:
+                            send_message(chat_id, ans_text, ans_kb, parse_mode="HTML")
+                        continue
+
                     # ─── AGAR QIZIQISHLAR TESTI JARAYONIDA BO'LSA ─────────
                     from personal_profile import is_in_interest_test, process_test_input, cancel_interest_test
                     if is_in_interest_test(chat_id):
@@ -3506,6 +3594,19 @@ async def bot_polling_loop():
                             remove_personal_interest_action(item_name=item_part, chat_id=chat_id)
                         else:
                             remove_personal_interest_action(chat_id=chat_id)
+                        continue
+
+                    # ─── SHAXSIY VAQT JADVALI BUYRUQLARI ──────────────────
+                    if norm_clean in ["jadvalimni ko'rsat", "jadvalimni korsat", "jadvalni ko'rsat", "jadvalni korsat", "jadvalim", "jadval", "/jadval", "/schedule"]:
+                        show_personal_schedule_action(chat_id)
+                        continue
+
+                    if any(norm_clean.startswith(p) for p in ["bugun qachon bo'shman", "bugun qachon boshman", "qachon bo'shman", "qachon boshman", "bugungi bo'sh vaqtim", "/free_time", "/bosh_vaqt"]):
+                        get_today_free_time_action(chat_id)
+                        continue
+
+                    if norm_clean in ["jadvalimni o'zgartir", "jadvalimni ozgartir", "jadvalni o'zgartir", "jadvalni ozgartir", "jadvalni o'zgartirish", "/edit_schedule"]:
+                        edit_personal_schedule_action(chat_id)
                         continue
 
                     if normalized in ["/quiz", "anketa", "/anketa", "test", "/test"]:
