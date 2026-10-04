@@ -341,9 +341,31 @@ def build_menu_keyboard():
             [
                 {"text": "\U0001f6e1 2FA holati", "callback_data": "quick_2fa"},
                 {"text": "🔄 Yangilash (GitHub)", "callback_data": "trigger_ota_update"}
+            ],
+            [
+                {"text": "ℹ️ Versiya va Tizim holati", "callback_data": "quick_version"}
             ]
         ]
     }
+
+def get_system_version_info():
+    import subprocess
+    git_desc = "So'nggi versiya (OTA)"
+    try:
+        res = subprocess.run(["git", "log", "-1", "--format=%h - %s (%cd)", "--date=short"], capture_output=True, text=True)
+        if res.returncode == 0 and res.stdout.strip():
+            git_desc = res.stdout.strip()
+    except Exception:
+        pass
+
+    return (
+        "🤖 <b>Jarvis AI Assistant — Tizim Holati</b>\n\n"
+        "📦 <b>Dastur versiyasi:</b> <code>v2.2 (OTA Active)</code>\n"
+        f"📌 <b>So'nggi commit:</b> <code>{git_desc}</code>\n"
+        "🧠 <b>Asosiy AI:</b> <code>openai/gpt-oss-120b</code>\n"
+        "⚡ <b>Zaxira AI:</b> <code>openai/gpt-oss-20b</code> (Avto-ulanish faol)\n"
+        "🟢 <b>Holat:</b> Barcha tizimlar muvaffaqiyatli yangilangan va to'liq aloqada!"
+    )
 
 session_name = os.getenv("SESSION_NAME")
 if not session_name:
@@ -2096,38 +2118,44 @@ tools = [
 def call_groq(messages, use_tools=True, temperature=0.7):
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-    payload = {
-        "model": groq_model,
-        "messages": messages,
-        "temperature": temperature
-    }
-    if use_tools:
-        payload["tools"] = tools
+    primary_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    models_to_try = [primary_model]
+    for alt in ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]:
+        if alt not in models_to_try:
+            models_to_try.append(alt)
 
-    for attempt in range(3):
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=25)
-            data = response.json()
-            if "error" in data:
-                err_info = data.get("error", {})
-                code = err_info.get("code")
-                msg = err_info.get("message", "")
-                print(f"[GROQ XABARI - Urinish {attempt + 1}]: {code or msg}")
-                if code == "rate_limit_exceeded" or "rate limit" in str(msg).lower():
+    for current_model in models_to_try:
+        payload = {
+            "model": current_model,
+            "messages": messages,
+            "temperature": temperature
+        }
+        if use_tools:
+            payload["tools"] = tools
+
+        for attempt in range(2):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=20)
+                data = response.json()
+                if "error" in data:
+                    err_info = data.get("error", {})
+                    code = err_info.get("code")
+                    msg = err_info.get("message", "")
+                    print(f"[GROQ {current_model} - Urinish {attempt + 1}]: {code or msg}")
+                    if code == "rate_limit_exceeded" or "rate limit" in str(msg).lower() or "tokens per day" in str(msg).lower():
+                        print(f"[GROQ] {current_model} limiti band, keyingi zaxira modelga o'tilmoqda...")
+                        break
                     import time
-                    time.sleep(3 * (attempt + 1))
+                    time.sleep(1.5)
                     continue
                 return data
-            return data
-        except requests.exceptions.RequestException as e:
-            print(f"[GROQ TARMOQ XATOLIK - Urinish {attempt + 1}]: {e}")
-            import time
-            time.sleep(2 * (attempt + 1))
-        except Exception as e:
-            print(f"[GROQ KUTILMAGAN XATOLIK]: {e}")
-            import time
-            time.sleep(1)
+            except requests.exceptions.RequestException as e:
+                print(f"[GROQ {current_model} TARMOQ XATOLIK - Urinish {attempt + 1}]: {e}")
+                import time
+                time.sleep(1)
+            except Exception as e:
+                print(f"[GROQ {current_model} KUTILMAGAN XATOLIK]: {e}")
+                break
 
     return {}
 
@@ -2140,7 +2168,7 @@ async def get_ai_response(chat_id, user_text):
     messages.extend(past_messages)
     messages.append({"role": "user", "content": user_text})
 
-    data = call_groq(messages, use_tools=True)
+    data = await asyncio.to_thread(call_groq, messages, True)
 
     if "choices" not in data or not data["choices"]:
         print("AI XATOLIK:", data)
@@ -2577,7 +2605,7 @@ async def get_ai_response(chat_id, user_text):
 
         messages.append(message)
         messages.append({"role": "tool", "tool_call_id": tool_call["id"], "content": str(func_result)})
-        data2 = call_groq(messages, use_tools=False)
+        data2 = await asyncio.to_thread(call_groq, messages, False)
         final_reply = data2["choices"][0]["message"]["content"] if ("choices" in data2 and data2["choices"]) else str(func_result)
     else:
         final_reply = message.get("content", "")
@@ -2752,6 +2780,11 @@ async def handle_callback(callback_query):
 
     if data == "trigger_ota_update":
         asyncio.create_task(perform_system_update_action(chat_id))
+        return
+
+    if data == "quick_version":
+        ver_text = get_system_version_info()
+        send_message(chat_id, ver_text, parse_mode="HTML")
         return
 
     # ─── ONBOARDING VA INTELLIGENCE FEEDBACK CALLBACKS ──────────────
@@ -3223,6 +3256,11 @@ async def bot_polling_loop():
 
                     if normalized in ["/update", "update", "/yangila", "yangila"]:
                         asyncio.create_task(perform_system_update_action(chat_id))
+                        continue
+
+                    if normalized in ["/version", "version", "/versiya", "versiya", "/info", "info", "/holat", "holat"]:
+                        ver_text = get_system_version_info()
+                        send_message(chat_id, ver_text, parse_mode="HTML")
                         continue
 
                     if normalized in ["/menu", "/start", "menyu", "menu", "/menyu"]:

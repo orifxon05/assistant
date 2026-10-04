@@ -112,5 +112,13 @@ fi
 echo ""
 echo "================================================="
 echo "🎉 YANGILASH MUVAFFAQIYATLI YAKUNLANDI!"
-echo "Botni ishga tushirish uchun: jarvis"
+if [ -d ".git" ]; then
+    COMMIT_INFO=$(git log -1 --pretty=format:"%h - %s (%cd)" --date=short 2>/dev/null)
+    echo "📌 O'rnatilgan commit: $COMMIT_INFO"
+fi
+echo "📦 Dastur versiyasi: v2.2"
+echo ""
+echo "👉 Yangi versiyani ishga tushirish uchun:"
+echo "   pkill -f 'python.*bot.py' 2>/dev/null"
+echo "   jarvis"
 echo "================================================="

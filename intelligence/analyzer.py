@@ -87,7 +87,7 @@ Quyidagi Telegram postini tahlil qil va faqat JSON qaytar:
 
     url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+    groq_model = os.getenv("INTELLIGENCE_MODEL", "openai/gpt-oss-20b")
     payload = {
         "model": groq_model,
         "messages": [
