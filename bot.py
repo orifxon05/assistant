@@ -110,6 +110,11 @@ QAT'IY QOIDALAR:
    - Tekshiruv oralig'ini (interval) o'zgartirish -> 'set_intelligence_interval'
    - Shaxsiy profil anketasini qayta to'ldirish -> 'start_profile_quiz'
    - Kanallardagi postlarni tahlil qilish (masalan: 24 soatlik postlar, manfaatli postlarni topish, vakansiyalarni ko'rib chiqish) -> 'analyze_channels_recent_posts'
+   - Shaxsiy qiziqishlar testini boshlash (9 bosqichli professional va shaxsiy qiziqishlar testi) -> 'start_interest_test'
+   - Shaxsiy profilni to'liq ko'rish/ko'rsatish -> 'show_personal_profile'
+   - Shaxsiy profilni tahrirlash/o'zgartirish menyusi -> 'edit_personal_profile'
+   - Shaxsiy profilga yangi qiziqish yoki texnologiya qo'shish -> 'add_personal_interest'
+   - Shaxsiy profildan qiziqishni olib tashlash/o'chirish -> 'remove_personal_interest'
  7. HECH QACHON RAD ETMA:
    - {name} Telegram ichidagi biror ish qilishni buyursa, HECH QACHON "Men buni qila olmayman", "Bu funksiya mavjud emas", "Bu imkonsiz" kabi rad javoblarni berma!
    - Agar {name} "kanallarni tahlil qil", "24 soat ichida yozilgan postlardan manfaatlisini tashla" kabi topshiriq bersa -> DARHOL 'analyze_channels_recent_posts' funksiyasini chaqir!
@@ -344,11 +349,11 @@ def build_menu_keyboard():
             ],
             [
                 {"text": "📊 Kanallarni tahlil qilish (24s)", "callback_data": "run_full_analysis"},
-                {"text": "🎯 Qiziqishlarim (Test)", "callback_data": "start_quiz"}
+                {"text": "🎯 Qiziqishlar testi", "callback_data": "pt_start_test"}
             ],
             [{"text": f"\U0001f3af Filtr: {mode_label}", "callback_data": "open_filter"}],
             [
-                {"text": "\U0001f464 Profilim", "callback_data": "quick_profile"},
+                {"text": "📋 Shaxsiy profilim", "callback_data": "pt_view_profile"},
                 {"text": "📂 Intelligence holati", "callback_data": "quick_intel"}
             ],
             [
@@ -1725,6 +1730,59 @@ def start_profile_quiz_action():
     send_message(ADMIN_ID, text, keyboard, parse_mode="HTML")
     return "Profil anketasi boshlandi. Yuqoridagi tugmalar orqali tanlang."
 
+def start_interest_test_action(chat_id=None):
+    from personal_profile import start_interest_test
+    target_id = chat_id or ADMIN_ID
+    text, keyboard = start_interest_test(target_id)
+    send_message(target_id, text, keyboard, parse_mode="HTML")
+    return "🎯 Shaxsiy qiziqishlar testi boshlandi! Savollarga ketma-ket javob bering."
+
+def show_personal_profile_action(chat_id=None):
+    from personal_profile import load_personal_profile, format_profile_view, build_profile_action_keyboard
+    target_id = chat_id or ADMIN_ID
+    prof = load_personal_profile()
+    text = format_profile_view(prof)
+    kb = build_profile_action_keyboard()
+    send_message(target_id, text, kb, parse_mode="HTML")
+    return "Shaxsiy profilingiz yuqorida ko'rsatildi."
+
+def edit_personal_profile_action(chat_id=None):
+    from personal_profile import get_edit_menu_text_and_keyboard
+    target_id = chat_id or ADMIN_ID
+    text, kb = get_edit_menu_text_and_keyboard()
+    send_message(target_id, text, kb, parse_mode="HTML")
+    return "Profilni o'zgartirish menyusi ochildi."
+
+def add_personal_interest_action(item_name=None, priority="HIGH", chat_id=None):
+    from personal_profile import add_interest_to_profile, prompt_add_interest_text
+    target_id = chat_id or ADMIN_ID
+    if item_name:
+        ok, msg = add_interest_to_profile(item_name, priority)
+        send_message(target_id, msg, {"inline_keyboard": [[{"text": "📋 Profilimni ko'rsat", "callback_data": "pt_view_profile"}]]}, parse_mode="HTML")
+        return msg
+    else:
+        pending_actions[target_id] = {"type": "awaiting_add_interest"}
+        text, kb = prompt_add_interest_text()
+        send_message(target_id, text, kb, parse_mode="HTML")
+        return "Qo'shmoqchi bo'lgan qiziqishingizni yozib yuboring."
+
+def remove_personal_interest_action(item_name=None, chat_id=None):
+    from personal_profile import remove_interest_from_profile, prompt_remove_interest_text
+    target_id = chat_id or ADMIN_ID
+    if item_name:
+        found = remove_interest_from_profile(item_name)
+        if found:
+            res = f"✅ <b>'{item_name}'</b> profilingizdan muvaffaqiyatli olib tashlandi."
+        else:
+            res = f"⚠️ <b>'{item_name}'</b> profilingizda topilmadi."
+        send_message(target_id, res, {"inline_keyboard": [[{"text": "📋 Profilimni ko'rsat", "callback_data": "pt_view_profile"}]]}, parse_mode="HTML")
+        return res
+    else:
+        pending_actions[target_id] = {"type": "awaiting_remove_interest"}
+        text, kb = prompt_remove_interest_text()
+        send_message(target_id, text, kb, parse_mode="HTML")
+        return "O'chirmoqchi bo'lgan qiziqishingizni tanlang yoki nomini yozing."
+
 async def analyze_channels_recent_posts_action(hours=24):
     from datetime import datetime, timedelta, timezone
     from intelligence.sources import get_intelligence_folder_peers
@@ -2141,6 +2199,31 @@ tools = [
         "description": "Kanallardagi oxirgi postlarni (masalan: 24 soat ichida yozilgan postlarni) o'qib, AI orqali tahlil qilib, foydalanuvchiga mos keluvchi manfaatli imkoniyat va vakansiyalarni topib beradi",
         "parameters": {"type": "object", "properties": {
             "hours": {"type": "integer", "description": "Necha soatlik postlarni tahlil qilish (standart: 24 soat)"}
+        }}}},
+    {"type": "function", "function": {
+        "name": "start_interest_test",
+        "description": "Foydalanuvchining shaxsiy qiziqishlari, sohasi, kiberxavfsizlik yo'nalishlari, texnologiyalari, maosh va karyera maqsadini aniqlovchi 9 bosqichli testni boshlaydi",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "show_personal_profile",
+        "description": "Foydalanuvchining to'liq shaxsiy profili va ustuvor qiziqishlarini ko'rsatadi",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "edit_personal_profile",
+        "description": "Foydalanuvchining shaxsiy profilini tahrirlash menyusini ko'rsatadi",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "add_personal_interest",
+        "description": "Foydalanuvchi profiliga yangi qiziqish yoki texnologiya qo'shadi",
+        "parameters": {"type": "object", "properties": {
+            "item_name": {"type": "string", "description": "Qo'shiladigan qiziqish yoki texnologiya nomi (masalan: 'Docker', 'SIEM', 'Python')"},
+            "priority": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"], "description": "Ustuvorlik darajasi (standart: HIGH)"}
+        }}}},
+    {"type": "function", "function": {
+        "name": "remove_personal_interest",
+        "description": "Foydalanuvchi profilidan biror qiziqish yoki texnologiyani olib tashlaydi/o'chiradi",
+        "parameters": {"type": "object", "properties": {
+            "item_name": {"type": "string", "description": "O'chiriladigan qiziqish nomi"}
         }}}}
 ]
 
@@ -2362,6 +2445,16 @@ async def get_ai_response(chat_id, user_text):
             func_result = start_profile_quiz_action()
         elif func_name == "analyze_channels_recent_posts":
             func_result = await analyze_channels_recent_posts_action(**func_args)
+        elif func_name == "start_interest_test":
+            func_result = start_interest_test_action(chat_id)
+        elif func_name == "show_personal_profile":
+            func_result = show_personal_profile_action(chat_id)
+        elif func_name == "edit_personal_profile":
+            func_result = edit_personal_profile_action(chat_id)
+        elif func_name == "add_personal_interest":
+            func_result = add_personal_interest_action(chat_id=chat_id, **func_args)
+        elif func_name == "remove_personal_interest":
+            func_result = remove_personal_interest_action(chat_id=chat_id, **func_args)
 
         # ─── YANGI CONFIRM KERAK BO'LGAN FUNKSIYALAR ────────────────
         elif func_name == "request_update_name":
@@ -2899,6 +2992,18 @@ async def handle_callback(callback_query):
         send_message(chat_id, ver_text, parse_mode="HTML")
         return
 
+    # ─── SHAXSIY PROFIL VA QIZIQISHLAR TESTI CALLBACKS ─────────────
+    if data.startswith("pt_"):
+        if data == "pt_action_add":
+            pending_actions[chat_id] = {"type": "awaiting_add_interest"}
+        elif data == "pt_action_del":
+            pending_actions[chat_id] = {"type": "awaiting_remove_interest"}
+        from personal_profile import handle_profile_callback
+        reply_txt, reply_kb = handle_profile_callback(chat_id, data)
+        if reply_txt:
+            send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
+        return
+
     # ─── ONBOARDING VA INTELLIGENCE FEEDBACK CALLBACKS ──────────────
     if data.startswith("ob_"):
         from intelligence.onboarding import handle_onboarding_callback
@@ -2937,9 +3042,7 @@ async def handle_callback(callback_query):
         return
 
     if data == "start_quiz":
-        from intelligence.onboarding import start_onboarding_quiz
-        text, keyboard = start_onboarding_quiz(ADMIN_ID)
-        send_message(ADMIN_ID, text, keyboard, parse_mode="HTML")
+        start_interest_test_action(ADMIN_ID)
         return
 
     if data == "quick_intel":
@@ -3358,11 +3461,55 @@ async def bot_polling_loop():
                         print(f"RAD ETILDI (admin emas): {chat_id} -> {text}")
                         send_message(chat_id, "Kechirasiz, bu shaxsiy yordamchi bot va faqat egasi uchun ishlaydi.")
                         continue
+                    # ─── AGAR QIZIQISHLAR TESTI JARAYONIDA BO'LSA ─────────
+                    from personal_profile import is_in_interest_test, process_test_input, cancel_interest_test
+                    if is_in_interest_test(chat_id):
+                        norm_check = text.strip().lower()
+                        if norm_check in ["bekor qilish", "/cancel", "cancel", "bekor"]:
+                            cancel_interest_test(chat_id)
+                            send_message(chat_id, "❌ Qiziqishlar testi bekor qilindi.", {"inline_keyboard": [[{"text": "🎯 Testni qayta boshlash", "callback_data": "pt_start_test"}]]})
+                            continue
+                        ans_text, ans_kb = process_test_input(chat_id, text)
+                        if ans_text:
+                            send_message(chat_id, ans_text, ans_kb, parse_mode="HTML")
+                        continue
+
                     normalized = text.strip().lower()
+                    norm_clean = normalized.replace("‘", "'").replace("’", "'").replace("`", "'").replace("ʻ", "'").replace("ʼ", "'")
+
+                    # ─── SHAXSIY PROFIL VA QIZIQISHLAR TESTI BUYRUQLARI ───
+                    if norm_clean in ["qiziqish testini boshlash", "qiziqish testi", "/interest_test", "/qiziqish_testi", "testni boshlash"]:
+                        start_interest_test_action(chat_id)
+                        continue
+
+                    if norm_clean in ["profilimni ko'rsat", "profilimni korsat", "profilni ko'rsat", "profilni korsat", "profilim", "/profil", "/profile", "shaxsiy profilim"]:
+                        show_personal_profile_action(chat_id)
+                        continue
+
+                    if norm_clean in ["profilimni o'zgartirish", "profilimni ozgartirish", "profilni o'zgartirish", "/edit_profile"]:
+                        edit_personal_profile_action(chat_id)
+                        continue
+
+                    if norm_clean.startswith("qiziqishimni qo'sh") or norm_clean.startswith("qiziqish qo'sh") or norm_clean.startswith("qiziqishimni qosh") or norm_clean.startswith("qiziqish qosh"):
+                        parts = re.split(r"qiziqish(?:imni)?\s+qo['ʻ`ʼ]?sh[:\s]*", text, flags=re.IGNORECASE)
+                        item_part = parts[-1].strip() if len(parts) > 1 else ""
+                        if item_part:
+                            add_personal_interest_action(item_name=item_part, chat_id=chat_id)
+                        else:
+                            add_personal_interest_action(chat_id=chat_id)
+                        continue
+
+                    if any(norm_clean.startswith(p) for p in ["qiziqishimni olib tashla", "qiziqishni olib tashla", "qiziqishimni o'chir", "qiziqishni o'chir", "qiziqishni ochir"]):
+                        parts = re.split(r"qiziqish(?:imni|ni)?\s+(?:olib\s+tashla|o['ʻ`ʼ]?chir)[:\s]*", text, flags=re.IGNORECASE)
+                        item_part = parts[-1].strip() if len(parts) > 1 else ""
+                        if item_part:
+                            remove_personal_interest_action(item_name=item_part, chat_id=chat_id)
+                        else:
+                            remove_personal_interest_action(chat_id=chat_id)
+                        continue
+
                     if normalized in ["/quiz", "anketa", "/anketa", "test", "/test"]:
-                        from intelligence.onboarding import start_onboarding_quiz
-                        text_q, kb_q = start_onboarding_quiz(ADMIN_ID)
-                        send_message(ADMIN_ID, text_q, kb_q, parse_mode="HTML")
+                        start_interest_test_action(ADMIN_ID)
                         continue
 
                     if normalized in ["/tahlil", "tahlil", "/analiz", "analiz"]:
@@ -3417,6 +3564,42 @@ async def bot_polling_loop():
                     if not_found:
                         reply_text += f"\n\nTopilmadi: {', '.join(not_found)}"
                     send_message(chat_id, reply_text)
+                    continue
+
+                if pending and pending.get("type") == "awaiting_add_interest":
+                    del pending_actions[chat_id]
+                    from personal_profile import add_interest_to_profile, parse_items_with_priority
+                    items = parse_items_with_priority(text)
+                    if not items and text.strip():
+                        items = [{"name": text.strip(), "priority": "HIGH"}]
+                    added = []
+                    for it in items:
+                        ok, msg = add_interest_to_profile(it["name"], priority=it.get("priority", "HIGH"))
+                        if ok:
+                            added.append(f"• <b>{it['name']}</b> [{it.get('priority', 'HIGH')}]")
+                    if added:
+                        send_message(chat_id, f"✅ Profilingizga muvaffaqiyatli qo'shildi:\n" + "\n".join(added), {"inline_keyboard": [[{"text": "📋 Profilimni ko'rsat", "callback_data": "pt_view_profile"}]]}, parse_mode="HTML")
+                    else:
+                        send_message(chat_id, "Qiziqish qo'shilmadi.")
+                    continue
+
+                if pending and pending.get("type") == "awaiting_remove_interest":
+                    del pending_actions[chat_id]
+                    from personal_profile import remove_interest_from_profile
+                    names = [n.strip() for n in text.split(",") if n.strip()]
+                    removed = []
+                    not_found = []
+                    for name in names:
+                        if remove_interest_from_profile(name):
+                            removed.append(name)
+                        else:
+                            not_found.append(name)
+                    res_parts = []
+                    if removed:
+                        res_parts.append(f"✅ Profilingizdan olib tashlandi: <b>{', '.join(removed)}</b>")
+                    if not_found:
+                        res_parts.append(f"⚠️ Profilingizda topilmadi: {', '.join(not_found)}")
+                    send_message(chat_id, "\n\n".join(res_parts), {"inline_keyboard": [[{"text": "📋 Profilimni ko'rsat", "callback_data": "pt_view_profile"}]]}, parse_mode="HTML")
                     continue
 
                 if "photo" in msg:

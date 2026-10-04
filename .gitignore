@@ -19,6 +19,7 @@ action_history.json
 intelligence_state.json
 intelligence_seen.json
 intelligence_preferences.json
+personal_profile.json
 
 # Backup / Archive files
 *.zip
