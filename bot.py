@@ -5,6 +5,7 @@ import asyncio
 import requests
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.errors import FloodWaitError
 from rapidfuzz import process, fuzz
 
 load_dotenv()
@@ -2148,7 +2149,12 @@ def call_groq(messages, use_tools=True, temperature=0.7):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     primary_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
     models_to_try = [primary_model]
-    for alt in ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"]:
+    for alt in [
+        "openai/gpt-oss-20b",
+        "llama-3.3-70b-versatile",
+        "qwen/qwen3.8-27b",
+        "llama-3.1-8b-instant"
+    ]:
         if alt not in models_to_try:
             models_to_try.append(alt)
 
@@ -2642,20 +2648,93 @@ async def get_ai_response(chat_id, user_text):
     return final_reply, None
 
 CONVERSATION_TIMEOUT = 10 * 60
+MAX_AUTOREPLY_PER_SESSION = 2
+MIN_REPLY_INTERVAL = 3.0
 
-def get_autoreply(chat_key, sender_name, user_text):
+def is_bot_or_assistant_message(text):
+    if not text:
+        return False
+    t = text.lower().strip()
+    bot_markers = [
+        "yetkazaman", "yetkazdim", "yetkazib qo'y", "yetkazamiz", "yetkazishimni",
+        "shaxsiy yordamchi", "shaxsiy assistent", "shaxsiy kotib",
+        "qabul qildim", "qabul qilindi", "xabarni qabul qildim",
+        "tarmoqda emas", "tarmoqda yo'q", "online emas", "onlayn emas",
+        "telegramni ko'ra olmayapti", "javob bera olmayapti",
+        "avtojavob", "avtomatik javob",
+        "men botman", "men sun'iy intellekt", "shaxsiy bot"
+    ]
+    for marker in bot_markers:
+        if marker in t:
+            return True
+    return False
+
+def is_closing_courtesy(text):
+    if not text:
+        return False
+    import re
+    t = text.lower()
+    for ap in ["'", "`", "\u2018", "\u2019", "\u02bb", "\u02bc"]:
+        t = t.replace(ap, "")
+    cleaned = re.sub(r"[^\w\s]", " ", t).strip()
+    words = cleaned.split()
+    if not words or len(words) > 7:
+        return False
+    closing_words = {
+        "rahmat", "arziydi", "xop", "mayli", "salomat", "boling",
+        "yaxshi", "tushundim", "kutaman", "bopti", "ok", "tashakkur",
+        "spasibo", "thanks", "thx", "albatta", "boladi", "xayr"
+    }
+    courtesy_count = sum(1 for w in words if w in closing_words)
+    return (courtesy_count / len(words)) >= 0.5
+
+async def get_autoreply(chat_key, sender_name, user_text):
     import time
     now_ts = time.time()
+
+    # 1. Boshqa bot yoki assistent ekanligini aniqlash (cheksiz bot-to-bot siklni to'xtatish):
+    if is_bot_or_assistant_message(user_text):
+        print(f"[AUTOREPLY] Bot/Assistent xabari aniqlandi, javob berilmadi (cheksiz sikl oldi olindi): '{user_text[:50]}'")
+        return None
 
     state = load_autoreply_state()
     chat_data = state.get(chat_key, {
         "introduced": False, "history": [],
-        "last_message_time": now_ts, "conversation_active": True,
-        "sender_name": sender_name
+        "last_message_time": now_ts, "last_reply_time": 0, "conversation_active": True,
+        "sender_name": sender_name, "count": 0
     })
     chat_data.setdefault("history", [])
     chat_data.setdefault("conversation_active", True)
     chat_data.setdefault("sender_name", sender_name)
+    chat_data.setdefault("count", 0)
+    chat_data.setdefault("last_reply_time", 0)
+
+    # 2. Sessiya taymauti: agar oxirgi xabardan beri CONVERSATION_TIMEOUT o'tgan bo'lsa, yangi sessiya ochamiz
+    last_msg_time = chat_data.get("last_message_time", 0)
+    if last_msg_time > 0 and (now_ts - last_msg_time) >= CONVERSATION_TIMEOUT:
+        chat_data["count"] = 0
+        chat_data["introduced"] = False
+        chat_data["history"] = []
+        chat_data["conversation_active"] = True
+
+    # 3. Botlar to'qnashuvi / Tezkor qayta javob (debounce): 3 soniyadan tez kelgan bo'lsa
+    last_reply_time = chat_data.get("last_reply_time", 0)
+    if last_reply_time > 0 and (now_ts - last_reply_time) < MIN_REPLY_INTERVAL:
+        print(f"[AUTOREPLY] Tezkor to'qnashuv ({now_ts - last_reply_time:.1f}s), takroriy javob to'xtatildi.")
+        return None
+
+    # 4. Suhbat yakuni / Minnatdorchilik tekshiruvi (agar allaqachon javob berilgan bo'lsa)
+    if chat_data["count"] >= 1 and is_closing_courtesy(user_text):
+        print(f"[AUTOREPLY] Suhbat tabiiy yakunlandi ({user_text}), ortiqcha takrorlamaslik uchun javob berilmadi.")
+        chat_data["last_message_time"] = now_ts
+        state[chat_key] = chat_data
+        save_autoreply_state(state)
+        return None
+
+    # 5. Bir sessiya uchun qat'iy javob berish cheklovi (maksimal 2 ta javob)
+    if chat_data["count"] >= MAX_AUTOREPLY_PER_SESSION:
+        print(f"[AUTOREPLY] {sender_name} uchun suhbat limiti tugadi ({chat_data['count']} ta javob berilgan).")
+        return None
 
     is_first_message = not chat_data.get("introduced", False)
     chat_data["introduced"] = True
@@ -2670,10 +2749,14 @@ def get_autoreply(chat_key, sender_name, user_text):
     messages.extend(chat_data["history"])
     messages.append({"role": "user", "content": f"{sender_name}: {user_text}"})
 
-    data = call_groq(messages, use_tools=False)
+    data = await asyncio.to_thread(call_groq, messages, False)
     if "choices" not in data or not data["choices"]:
         print("AUTOREPLY AI XATOLIK:", data)
-        reply = f"Assalomu alaykum! Xabaringizni qabul qildim, {OWNER_NAME}ga albatta yetkazaman."
+        if is_first_message:
+            reply = f"Assalomu alaykum! Xabaringizni qabul qildim, {OWNER_NAME}ga albatta yetkazaman."
+        else:
+            print("[AUTOREPLY] AI xatosi yuz berganda takroriy shablon yuborilmadi.")
+            return None
     else:
         reply = data["choices"][0]["message"]["content"]
 
@@ -2681,6 +2764,7 @@ def get_autoreply(chat_key, sender_name, user_text):
     chat_data["history"].append({"role": "assistant", "content": reply})
     chat_data["history"] = chat_data["history"][-MAX_AUTOREPLY_HISTORY:]
     chat_data["count"] = chat_data.get("count", 0) + 1
+    chat_data["last_reply_time"] = time.time()
 
     state[chat_key] = chat_data
     save_autoreply_state(state)
@@ -3207,26 +3291,33 @@ async def handle_callback(callback_query):
 
 @telethon_client.on(events.NewMessage(incoming=True))
 async def autoreply_handler(event):
-    if not event.is_private:
-        return
-    if not is_autoreply_enabled():
-        return
-    sender = await event.get_sender()
-    if getattr(sender, "bot", False):
-        return
-    if not should_autoreply_to_sender(sender):
-        return
-    sender_name = getattr(sender, "first_name", "Kimdir") or "Kimdir"
-    user_text = event.raw_text
-    if not user_text:
-        return
-    print(f"[AUTOREPLY] {sender_name}: {user_text}")
-    reply = get_autoreply(str(event.chat_id), sender_name, user_text)
-    if reply is None:
-        print(f"[AUTOREPLY] Limitdan keyin, javob yuborilmadi.")
-        return
-    await event.reply(reply)
-    print(f"[AUTOREPLY] Javob yuborildi: {reply}")
+    try:
+        if not event.is_private:
+            return
+        if not is_autoreply_enabled():
+            return
+        sender = await event.get_sender()
+        if not sender or getattr(sender, "bot", False):
+            return
+        if getattr(sender, "is_self", False) or sender.id == ADMIN_ID:
+            return
+        if not should_autoreply_to_sender(sender):
+            return
+        sender_name = getattr(sender, "first_name", "Kimdir") or "Kimdir"
+        user_text = event.raw_text
+        if not user_text:
+            return
+
+        print(f"[AUTOREPLY] {sender_name}: {user_text}")
+        reply = await get_autoreply(str(event.chat_id), sender_name, user_text)
+        if reply is None:
+            return
+        await event.reply(reply)
+        print(f"[AUTOREPLY] Javob yuborildi: {reply}")
+    except FloodWaitError as e:
+        print(f"[AUTOREPLY FLOODWAIT]: Telegram {e.seconds} soniya kutishni talab qildi.")
+    except Exception as e:
+        print(f"[AUTOREPLY XATOLIK]: {e}")
 
 async def bot_polling_loop():
     print("Bot ishga tushdi...")
