@@ -2105,7 +2105,6 @@ def call_groq(messages, use_tools=True, temperature=0.7):
     if use_tools:
         payload["tools"] = tools
 
-    last_error = {}
     for attempt in range(3):
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=25)
@@ -2115,7 +2114,6 @@ def call_groq(messages, use_tools=True, temperature=0.7):
                 code = err_info.get("code")
                 msg = err_info.get("message", "")
                 print(f"[GROQ XABARI - Urinish {attempt + 1}]: {code or msg}")
-                last_error = err_info
                 if code == "rate_limit_exceeded" or "rate limit" in str(msg).lower():
                     import time
                     time.sleep(3 * (attempt + 1))
@@ -2124,20 +2122,14 @@ def call_groq(messages, use_tools=True, temperature=0.7):
             return data
         except requests.exceptions.RequestException as e:
             print(f"[GROQ TARMOQ XATOLIK - Urinish {attempt + 1}]: {e}")
-            last_error = {"message": str(e), "code": "network_error"}
             import time
             time.sleep(2 * (attempt + 1))
         except Exception as e:
             print(f"[GROQ KUTILMAGAN XATOLIK]: {e}")
-            last_error = {"message": str(e), "code": "unexpected_error"}
             import time
             time.sleep(1)
 
-    is_rate_limit = (
-        last_error.get("code") == "rate_limit_exceeded" or
-        "rate limit" in str(last_error.get("message", "")).lower()
-    )
-    return {"error": last_error, "error_type": "rate_limit" if is_rate_limit else "failed"}
+    return {}
 
 
 async def get_ai_response(chat_id, user_text):
@@ -2152,19 +2144,7 @@ async def get_ai_response(chat_id, user_text):
 
     if "choices" not in data or not data["choices"]:
         print("AI XATOLIK:", data)
-        err = data.get("error", {}) if isinstance(data, dict) else {}
-        err_msg = str(err.get("message", "")).lower() if isinstance(err, dict) else ""
-        err_code = str(err.get("code", "")).lower() if isinstance(err, dict) else ""
-
-        if (
-            data.get("error_type") == "rate_limit" or
-            err_code == "rate_limit_exceeded" or
-            "rate limit" in err_msg
-        ):
-            return "Hozir tizim band, bir necha soniyadan keyin qayta urinib ko'ring.", build_menu_keyboard()
-
-        return ("⚠️ Hozirda AI xizmatida (Groq) yuklama yuqori yoki tarmoqda uzilish kuzatildi. "
-                "Iltimos, 1 daqiqadan so'ng qayta yozing yoki quyidagi menyudan foydalaning:"), build_menu_keyboard()
+        return "Hozir tizim band, bir necha soniyadan keyin qayta urinib ko'ring.", build_menu_keyboard()
 
     message = data["choices"][0]["message"]
 
