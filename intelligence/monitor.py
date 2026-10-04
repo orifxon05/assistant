@@ -67,6 +67,7 @@ async def run_intelligence_check(telethon_client, send_bot_message_func=None, ad
                 # Analyze via Groq AI
                 channel_intent = src_pref.get("intent", "all")
                 analysis = analyze_post_with_ai(msg.text, channel_title=title, channel_intent=channel_intent)
+                await asyncio.sleep(5)
 
                 score = analysis.get("relevance_score", 0)
                 level = analysis.get("level", "IGNORE")
@@ -100,15 +101,8 @@ async def run_intelligence_check(telethon_client, send_bot_message_func=None, ad
                         except Exception as e:
                             print(f"[MONITOR] Telegramga xabar yuborishda xatolik: {e}")
 
-                # ⏳ Groq bepul tarifidagi TPM (8000 token/daqiqa) limitiga tushib qolmaslik uchun
-                # har bir yangi post tahlilidan so'ng 5 soniya kechikish:
-                await asyncio.sleep(5)
-
         except Exception as e:
             print(f"[MONITOR] Kanalni tekshirishda xatolik ({getattr(entity, 'id', 'peer')}): {e}")
-
-        # Har bir kanal yakunlangach 1 soniya nafas olish:
-        await asyncio.sleep(1)
 
     return processed_count, relevant_found
 
