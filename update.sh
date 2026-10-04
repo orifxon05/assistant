@@ -18,7 +18,12 @@ cp contacts.json history.json todos.json autoreply_state.json status.json action
 REPO_URL="https://github.com/orifxon05/assistant.git"
 UPDATED=0
 
-# 1. Agar loyiha Git orqali boshqarilayotgan bo'lsa:
+# 1. Agar loyiha Git orqali boshqarilayotgan bo'lsa (yoki .git yo'q bo'lsa avto-ulash):
+if [ ! -d ".git" ]; then
+    git init 2>/dev/null
+    git remote add origin "$REPO_URL" 2>/dev/null
+fi
+
 if [ -d ".git" ]; then
     echo "📡 GitHub'dan yangilanishlar olinmoqda (konfliktsiz toza sinxronizatsiya)..."
     git remote set-url origin "$REPO_URL" 2>/dev/null
@@ -107,6 +112,20 @@ if python -m py_compile bot.py 2>/dev/null; then
     echo "✅ Sintaksis tekshiruvidan muvaffaqiyatli o'tdi!"
 else
     echo "⚠️ Diqqat: bot.py faylida xatolik aniqlandi."
+# Termux 'jarvis' buyrug'ini doim to'g'ri ishlashi uchun yangilab qo'yish:
+if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
+    cat > "$PREFIX/bin/jarvis" << RUNNEREOF
+#!/data/data/com.termux/files/usr/bin/bash
+cd "$CURRENT_DIR"
+if [ "\$1" = "update" ]; then
+    bash update.sh
+elif [ "\$1" = "test" ]; then
+    python test_intelligence.py
+else
+    python bot.py
+fi
+RUNNEREOF
+    chmod +x "$PREFIX/bin/jarvis" 2>/dev/null
 fi
 
 echo ""
