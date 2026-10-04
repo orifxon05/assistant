@@ -151,7 +151,8 @@ async def intelligence_monitor_loop(telethon_client, send_bot_message_func, admi
                         except Exception as e:
                             print("[MONITOR] Kunlik xulosa yuborishda xatolik:", e)
 
-            # Sleep for configured interval
+            # BARCHA kanallar (barcha entity) tekshirilib bo'lgandan KEYIN
+            # asosiy while-tsiklida belgilangan interval bo'yicha kutish:
             interval_mins = get_check_interval()
             await asyncio.sleep(interval_mins * 60)
 
