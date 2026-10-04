@@ -58,8 +58,8 @@ while [ -n "$API_ID" ] && [ "$API_ID" -gt 2147483647 ] 2>/dev/null; do
 done
 
 read -p "Telegram API Hash (my.telegram.org): " API_HASH
-read -p "Sizning shaxsiy Telegram ID raqamingiz (Admin ID, @userinfobot beradi): " ADMIN_ID
-read -p "Ismingiz (masalan: Rustam): " OWNER_NAME
+read -p "Ismingiz (masalan: Rustam) [standart: Telegram profilingizdan olinadi]: " OWNER_NAME
+OWNER_NAME=${OWNER_NAME:-Foydalanuvchi}
 
 cat > .env << ENVEOF
 TELEGRAM_BOT_TOKEN=$BOT_TOKEN

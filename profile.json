@@ -1,6 +1,6 @@
 {
-  "name": "Orifxon",
-  "university": "O'zbekiston xalqaro islomshunoslik akademiyasi",
+  "name": "Foydalanuvchi",
+  "university": "",
   "year": "3-kurs",
   "status": "Talaba",
   "primary_field": "Cybersecurity / Axborot xavfsizligi",
@@ -76,5 +76,5 @@
   "allow_uzbekistan": true,
   "allow_global_online": true,
   "min_relevance_score_to_send": 80,
-  "onboarding_completed": true
+  "onboarding_completed": false
 }
