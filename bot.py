@@ -119,6 +119,9 @@ QAT'IY QOIDALAR:
    - Bugun qachon bo'sh ekanligini va hozirgi bandlik holatini tekshirish -> 'get_today_free_time'
    - Shaxsiy vaqt jadvalini o'zgartirish/sozlash -> 'edit_personal_schedule'
    - Vakansiya ish vaqtini foydalanuvchi jadvali bilan solishtirish -> 'check_job_schedule'
+   - Shaxsiy joylashuv va transport profilini ko'rish (shahar, tuman, remote/hybrid/ofis, yo'l vaqti, transport) -> 'show_location_profile'
+   - Joylashuv va transport profilini o'zgartirish -> 'edit_location_profile'
+   - Vakansiya manzili va ish formatini foydalanuvchi joylashuviga mosligini tekshirish -> 'check_job_location'
  7. HECH QACHON RAD ETMA:
    - {name} Telegram ichidagi biror ish qilishni buyursa, HECH QACHON "Men buni qila olmayman", "Bu funksiya mavjud emas", "Bu imkonsiz" kabi rad javoblarni berma!
    - Agar {name} "kanallarni tahlil qil", "24 soat ichida yozilgan postlardan manfaatlisini tashla" kabi topshiriq bersa -> DARHOL 'analyze_channels_recent_posts' funksiyasini chaqir!
@@ -362,14 +365,17 @@ def build_menu_keyboard():
             ],
             [
                 {"text": "📋 Shaxsiy profilim", "callback_data": "pt_view_profile"},
-                {"text": "📂 Intelligence holati", "callback_data": "quick_intel"}
+                {"text": "📍 Manzil & Transport", "callback_data": "loc_view"}
             ],
             [
-                {"text": "\U0001f512 Maxfiylik", "callback_data": "quick_privacy"},
-                {"text": "\U0001f4e2 Kanallar", "callback_data": "quick_channels"}
+                {"text": "📂 Intelligence holati", "callback_data": "quick_intel"},
+                {"text": "\U0001f512 Maxfiylik", "callback_data": "quick_privacy"}
             ],
             [
-                {"text": "\U0001f465 Guruhlar", "callback_data": "quick_groups"},
+                {"text": "\U0001f4e2 Kanallar", "callback_data": "quick_channels"},
+                {"text": "\U0001f465 Guruhlar", "callback_data": "quick_groups"}
+            ],
+            [
                 {"text": "\U0001f510 Seanslar", "callback_data": "quick_sessions"}
             ],
             [
@@ -1821,6 +1827,29 @@ def check_job_schedule_action(job_start_time, job_end_time, job_days=None, is_re
     send_message(target_id, res["summary_uz"], parse_mode="HTML")
     return res["summary_uz"]
 
+def show_location_profile_action(chat_id=None):
+    from location_transport import load_location_profile, format_location_view, build_location_action_keyboard
+    target_id = chat_id or ADMIN_ID
+    prof = load_location_profile()
+    text = format_location_view(prof)
+    kb = build_location_action_keyboard()
+    send_message(target_id, text, kb, parse_mode="HTML")
+    return "Joylashuv va transport profilingiz yuqorida ko'rsatildi."
+
+def edit_location_profile_action(chat_id=None):
+    from location_transport import start_location_setup
+    target_id = chat_id or ADMIN_ID
+    text, kb = start_location_setup(target_id)
+    send_message(target_id, text, kb, parse_mode="HTML")
+    return "Joylashuv va transport profilini sozlash boshlandi."
+
+def check_job_location_action(job_city="Toshkent", job_district=None, job_format="On-site", chat_id=None):
+    from location_transport import check_location_compatibility
+    target_id = chat_id or ADMIN_ID
+    res = check_location_compatibility(job_city, job_district, job_format)
+    send_message(target_id, res["summary_uz"], parse_mode="HTML")
+    return res["summary_uz"]
+
 async def analyze_channels_recent_posts_action(hours=24):
     from datetime import datetime, timedelta, timezone
     from intelligence.sources import get_intelligence_folder_peers
@@ -2282,7 +2311,23 @@ tools = [
             "job_start_time": {"type": "string", "description": "Vakansiya ish boshlanish vaqti (masalan '09:00', '14:00')"},
             "job_end_time": {"type": "string", "description": "Vakansiya ish tugash vaqti (masalan '18:00', '19:00')"},
             "is_remote": {"type": "boolean", "description": "Masofaviy ish (remote) ekanligi (standart: false)"}
-        }, "required": ["job_start_time", "job_end_time"]}}}
+        }, "required": ["job_start_time", "job_end_time"]}}},
+    {"type": "function", "function": {
+        "name": "show_location_profile",
+        "description": "Foydalanuvchining shaxsiy joylashuv va transport profilini (shahar, tuman, remote/hybrid/ofis munosabati, yo'l vaqti, transport) ko'rsatadi",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "edit_location_profile",
+        "description": "Joylashuv va transport profilini o'zgartirish menyusini ochadi",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "check_job_location",
+        "description": "Vakansiya manzili (shahar, tuman, remote/hybrid/ofis) foydalanuvchi joylashuviga mos kelishini tekshiradi",
+        "parameters": {"type": "object", "properties": {
+            "job_city": {"type": "string", "description": "Vakansiya shahri (masalan 'Toshkent')"},
+            "job_district": {"type": "string", "description": "Vakansiya tumani (masalan 'Shayxontohur')"},
+            "job_format": {"type": "string", "enum": ["Remote", "Hybrid", "On-site"], "description": "Ish formati"}
+        }, "required": ["job_city"]}}}
 ]
 
 def call_groq(messages, use_tools=True, temperature=0.7):
@@ -2521,6 +2566,12 @@ async def get_ai_response(chat_id, user_text):
             func_result = edit_personal_schedule_action(chat_id)
         elif func_name == "check_job_schedule":
             func_result = check_job_schedule_action(chat_id=chat_id, **func_args)
+        elif func_name == "show_location_profile":
+            func_result = show_location_profile_action(chat_id)
+        elif func_name == "edit_location_profile":
+            func_result = edit_location_profile_action(chat_id)
+        elif func_name == "check_job_location":
+            func_result = check_job_location_action(chat_id=chat_id, **func_args)
 
         # ─── YANGI CONFIRM KERAK BO'LGAN FUNKSIYALAR ────────────────
         elif func_name == "request_update_name":
@@ -3078,6 +3129,14 @@ async def handle_callback(callback_query):
             send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
         return
 
+    # ─── JOYLASHUV VA TRANSPORT CALLBACKS ─────────────────────────
+    if data.startswith("loc_"):
+        from location_transport import handle_location_callback
+        reply_txt, reply_kb = handle_location_callback(chat_id, data)
+        if reply_txt:
+            send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
+        return
+
     # ─── ONBOARDING VA INTELLIGENCE FEEDBACK CALLBACKS ──────────────
     if data.startswith("ob_"):
         from intelligence.onboarding import handle_onboarding_callback
@@ -3536,6 +3595,19 @@ async def bot_polling_loop():
                         send_message(chat_id, "Kechirasiz, bu shaxsiy yordamchi bot va faqat egasi uchun ishlaydi.")
                         continue
 
+                    # ─── AGAR JOYLASHUV SOZLASH JARAYONIDA BO'LSA ─────────
+                    from location_transport import is_in_location_setup, process_location_input, cancel_location_setup
+                    if is_in_location_setup(chat_id):
+                        norm_check = text.strip().lower()
+                        if norm_check in ["bekor qilish", "/cancel", "cancel", "bekor"]:
+                            cancel_location_setup(chat_id)
+                            send_message(chat_id, "❌ Joylashuv sozlash bekor qilindi.", {"inline_keyboard": [[{"text": "📍 Manzilimni ko'rsat", "callback_data": "loc_view"}]]})
+                            continue
+                        ans_text, ans_kb = process_location_input(chat_id, text)
+                        if ans_text:
+                            send_message(chat_id, ans_text, ans_kb, parse_mode="HTML")
+                        continue
+
                     # ─── AGAR JADVAL SOZLASH JARAYONIDA BO'LSA ─────────────
                     from personal_schedule import is_in_schedule_setup, process_schedule_input, cancel_schedule_setup
                     if is_in_schedule_setup(chat_id):
@@ -3607,6 +3679,15 @@ async def bot_polling_loop():
 
                     if norm_clean in ["jadvalimni o'zgartir", "jadvalimni ozgartir", "jadvalni o'zgartir", "jadvalni ozgartir", "jadvalni o'zgartirish", "/edit_schedule"]:
                         edit_personal_schedule_action(chat_id)
+                        continue
+
+                    # ─── JOYLASHUV VA TRANSPORT BUYRUQLARI ────────────────
+                    if norm_clean in ["manzilimni ko'rsat", "manzilimni korsat", "joylashuvimni ko'rsat", "joylashuvimni korsat", "manzilim", "joylashuvim", "location", "/location", "/manzil"]:
+                        show_location_profile_action(chat_id)
+                        continue
+
+                    if norm_clean in ["manzilimni o'zgartir", "manzilimni ozgartir", "joylashuvimni o'zgartir", "joylashuvimni ozgartir", "manzilni o'zgartirish", "/edit_location"]:
+                        edit_location_profile_action(chat_id)
                         continue
 
                     if normalized in ["/quiz", "anketa", "/anketa", "test", "/test"]:

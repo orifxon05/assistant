@@ -21,6 +21,7 @@ intelligence_seen.json
 intelligence_preferences.json
 personal_profile.json
 schedule.json
+location_profile.json
 
 # Backup / Archive files
 *.zip
