@@ -1917,7 +1917,9 @@ async def analyze_channels_recent_posts_action(hours=24):
     from datetime import datetime, timedelta, timezone
     from intelligence.sources import get_intelligence_folder_peers
     from intelligence.analyzer import analyze_post_with_ai
-    from intelligence.formatter import format_intelligence_message
+    from intelligence.formatter import format_intelligence_message, format_matched_vacancy_notification
+    from vacancy_analyzer import is_vacancy_post
+    from vacancy_matcher import match_vacancy_with_profile
 
     send_message(ADMIN_ID, f"🔍 Oxirgi {hours} soat ichidagi postlar tahlil qilinmoqda, biroz kuting...")
 
@@ -1948,15 +1950,34 @@ async def analyze_channels_recent_posts_action(hours=24):
                     continue
 
                 total_scanned += 1
-                analysis = analyze_post_with_ai(msg.text, channel_title=title)
-                score = analysis.get("relevance_score", 0)
+                post_link = f"https://t.me/{uname}/{msg.id}" if uname else ""
 
-                if score >= 70:
-                    post_link = f"https://t.me/{uname}/{msg.id}" if uname else ""
-                    formatted_txt, kb = format_intelligence_message(analysis, source_title=title, post_link=post_link)
-                    send_message(ADMIN_ID, formatted_txt, kb, parse_mode="HTML")
-                    beneficial_posts.append((title, analysis.get("title", "")))
-                    await asyncio.sleep(1.5)
+                if is_vacancy_post(msg.text):
+                    match_result = match_vacancy_with_profile(msg.text)
+                    score = match_result.get("overall_score", match_result.get("match_score", 0))
+                    has_conflict = match_result.get("has_time_conflict", False)
+                    conflict_hrs = match_result.get("conflict_hours", 0)
+
+                    # Agar vaqt jiddiy to'qnashsa (>= 1.5 soat), scoreni tushiramiz
+                    if has_conflict and conflict_hrs >= 1.5:
+                        score = min(score, 40)
+
+                    # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
+                    if score >= 75:
+                        formatted_txt, kb = format_matched_vacancy_notification(match_result, source_title=title, post_link=post_link)
+                        send_message(ADMIN_ID, formatted_txt, kb, parse_mode="HTML")
+                        beneficial_posts.append((title, match_result.get("vacancy_summary", {}).get("title", "Vakansiya")))
+                        await asyncio.sleep(1.5)
+                else:
+                    analysis = analyze_post_with_ai(msg.text, channel_title=title)
+                    score = analysis.get("relevance_score", 0)
+
+                    # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
+                    if score >= 75:
+                        formatted_txt, kb = format_intelligence_message(analysis, source_title=title, post_link=post_link)
+                        send_message(ADMIN_ID, formatted_txt, kb, parse_mode="HTML")
+                        beneficial_posts.append((title, analysis.get("title", "")))
+                        await asyncio.sleep(1.5)
 
                 # Groq TPM limitidan oshib ketmaslik uchun kechikish:
                 await asyncio.sleep(4)

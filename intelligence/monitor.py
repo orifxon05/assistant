@@ -64,42 +64,83 @@ async def run_intelligence_check(telethon_client, send_bot_message_func=None, ad
                 mark_message_seen(msg.text, msg.id, entity.id)
                 processed_count += 1
 
-                # Analyze via Groq AI
-                channel_intent = src_pref.get("intent", "all")
-                analysis = analyze_post_with_ai(msg.text, channel_title=title, channel_intent=channel_intent)
-                await asyncio.sleep(5)
-
-                score = analysis.get("relevance_score", 0)
-                level = analysis.get("level", "IGNORE")
-
                 # Post link
-                post_link = ""
-                if uname:
-                    post_link = f"https://t.me/{uname}/{msg.id}"
+                post_link = f"https://t.me/{uname}/{msg.id}" if uname else ""
 
-                if score >= 60:
-                    record_daily_item(
-                        title=analysis.get("title", "Imkoniyat"),
-                        company=analysis.get("company", ""),
-                        link=post_link,
-                        category=",".join(analysis.get("categories", [])),
-                        score=score,
-                        level=level
-                    )
+                # 1. Vakansiya ekanligini tekshirish
+                from vacancy_analyzer import is_vacancy_post
+                is_vac = is_vacancy_post(msg.text)
 
-                # Send only 🔥 and 🟢 (score >= 80)
-                if score >= 80:
-                    relevant_found.append((title, analysis))
-                    msg_text, keyboard = format_intelligence_message(analysis, source_title=title, post_link=post_link)
+                if is_vac:
+                    from vacancy_matcher import match_vacancy_with_profile
+                    from .formatter import format_matched_vacancy_notification
 
-                    if dry_run or not send_bot_message_func or not admin_id:
-                        print(f"\n[DRY RUN TOPILDI: {score} BALL] -> {title}:\n{msg_text}\n")
+                    match_result = match_vacancy_with_profile(msg.text)
+                    score = match_result.get("overall_score", 0)
+                    has_conflict = match_result.get("has_time_conflict", False)
+                    conflict_hrs = match_result.get("conflict_hours", 0)
+
+                    # Agar vaqt jiddiy to'qnashsa (>= 1.5 soat), scoreni tushiramiz
+                    if has_conflict and conflict_hrs >= 1.5:
+                        score = min(score, 40)
+
+                    # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
+                    if score >= 75:
+                        record_daily_item(
+                            title=match_result.get("vacancy_summary", {}).get("title", "Vakansiya"),
+                            company=match_result.get("vacancy_summary", {}).get("company", ""),
+                            link=post_link,
+                            category="Vakansiya",
+                            score=score,
+                            level="URGENT" if score >= 90 else "USEFUL"
+                        )
+                        relevant_found.append((title, match_result))
+                        msg_text, keyboard = format_matched_vacancy_notification(match_result, source_title=title, post_link=post_link)
+
+                        if dry_run or not send_bot_message_func or not admin_id:
+                            print(f"\n[TOPILDI: {score} BALL (Vakansiya)] -> {title}:\n{msg_text}\n")
+                        else:
+                            try:
+                                send_bot_message_func(admin_id, msg_text, keyboard, parse_mode="HTML")
+                                await asyncio.sleep(2)  # Delay between notifications
+                            except Exception as e:
+                                print(f"[MONITOR] Xabar yuborishda xatolik: {e}")
                     else:
-                        try:
-                            send_bot_message_func(admin_id, msg_text, keyboard, parse_mode="HTML")
-                            await asyncio.sleep(2)  # Delay between notifications
-                        except Exception as e:
-                            print(f"[MONITOR] Telegramga xabar yuborishda xatolik: {e}")
+                        # Past score postlar (< 75) yuborilmaydi
+                        print(f"[MONITOR] Vakansiya o'tkazib yuborildi (Score: {score} < 75) - {title}")
+                else:
+                    # Boshqa e'lonlar (Kurs, Grant, Hackathon va h.k.)
+                    channel_intent = src_pref.get("intent", "all")
+                    analysis = analyze_post_with_ai(msg.text, channel_title=title, channel_intent=channel_intent)
+                    await asyncio.sleep(4)
+
+                    score = analysis.get("relevance_score", 0)
+                    level = analysis.get("level", "IGNORE")
+
+                    # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
+                    if score >= 75:
+                        record_daily_item(
+                            title=analysis.get("title", "Imkoniyat"),
+                            company=analysis.get("company", ""),
+                            link=post_link,
+                            category=",".join(analysis.get("categories", [])),
+                            score=score,
+                            level=level
+                        )
+                        relevant_found.append((title, analysis))
+                        msg_text, keyboard = format_intelligence_message(analysis, source_title=title, post_link=post_link)
+
+                        if dry_run or not send_bot_message_func or not admin_id:
+                            print(f"\n[TOPILDI: {score} BALL (Imkoniyat)] -> {title}:\n{msg_text}\n")
+                        else:
+                            try:
+                                send_bot_message_func(admin_id, msg_text, keyboard, parse_mode="HTML")
+                                await asyncio.sleep(2)  # Delay between notifications
+                            except Exception as e:
+                                print(f"[MONITOR] Telegramga xabar yuborishda xatolik: {e}")
+                    else:
+                        # Past score postlar (< 75) yuborilmaydi
+                        print(f"[MONITOR] Post o'tkazib yuborildi (Score: {score} < 75) - {title}")
 
         except Exception as e:
             print(f"[MONITOR] Kanalni tekshirishda xatolik ({getattr(entity, 'id', 'peer')}): {e}")
