@@ -122,6 +122,9 @@ QAT'IY QOIDALAR:
    - Shaxsiy joylashuv va transport profilini ko'rish (shahar, tuman, remote/hybrid/ofis, yo'l vaqti, transport) -> 'show_location_profile'
    - Joylashuv va transport profilini o'zgartirish -> 'edit_location_profile'
    - Vakansiya manzili va ish formatini foydalanuvchi joylashuviga mosligini tekshirish -> 'check_job_location'
+   - Shaxsiy ko'nikmalar (Skills Profile)ni ko'rish (universitet, kurslar, sertifikatlar, python, linux, siem, networking, tillar, darajalar) -> 'show_skills_profile'
+   - Ko'nikmalar profilini o'zgartirish/sozlash -> 'edit_skills_profile'
+   - Aniq bir skill darajasini (Beginner, Intermediate, Advanced) belgilash -> 'set_skill_level'
  7. HECH QACHON RAD ETMA:
    - {name} Telegram ichidagi biror ish qilishni buyursa, HECH QACHON "Men buni qila olmayman", "Bu funksiya mavjud emas", "Bu imkonsiz" kabi rad javoblarni berma!
    - Agar {name} "kanallarni tahlil qil", "24 soat ichida yozilgan postlardan manfaatlisini tashla" kabi topshiriq bersa -> DARHOL 'analyze_channels_recent_posts' funksiyasini chaqir!
@@ -365,10 +368,13 @@ def build_menu_keyboard():
             ],
             [
                 {"text": "📋 Shaxsiy profilim", "callback_data": "pt_view_profile"},
-                {"text": "📍 Manzil & Transport", "callback_data": "loc_view"}
+                {"text": "🛠 Skills Profile", "callback_data": "sk_view"}
             ],
             [
-                {"text": "📂 Intelligence holati", "callback_data": "quick_intel"},
+                {"text": "📍 Manzil & Transport", "callback_data": "loc_view"},
+                {"text": "📂 Intelligence holati", "callback_data": "quick_intel"}
+            ],
+            [
                 {"text": "⚙️ Telegram sozlamalari", "callback_data": "open_tg_settings"}
             ],
             [
@@ -1861,6 +1867,52 @@ def check_job_location_action(job_city="Toshkent", job_district=None, job_format
     send_message(target_id, res["summary_uz"], parse_mode="HTML")
     return res["summary_uz"]
 
+def show_skills_profile_action(chat_id=None):
+    from skills_profile import load_skills_profile, format_skills_view, build_skills_action_keyboard
+    target_id = chat_id or ADMIN_ID
+    prof = load_skills_profile()
+    text = format_skills_view(prof)
+    kb = build_skills_action_keyboard()
+    send_message(target_id, text, kb, parse_mode="HTML")
+    return "Skills (ko'nikmalar) profilingiz yuqorida ko'rsatildi."
+
+def edit_skills_profile_action(chat_id=None):
+    from skills_profile import start_skills_wizard
+    target_id = chat_id or ADMIN_ID
+    text, kb = start_skills_wizard(target_id)
+    send_message(target_id, text, kb, parse_mode="HTML")
+    return "Ko'nikmalar so'rovnomasi boshlandi."
+
+def set_skill_level_action(skill_name, level, chat_id=None):
+    from skills_profile import load_skills_profile, save_skills_profile, LEVEL_BADGES, build_skills_action_keyboard
+    target_id = chat_id or ADMIN_ID
+    prof = load_skills_profile()
+    s_clean = skill_name.strip().lower()
+    match_key = None
+    for k in ["python", "linux", "networking", "siem", "git_github", "programming_languages", "cybersecurity_knowledge", "english", "russian", "experience"]:
+        if s_clean in k or k in s_clean:
+            match_key = k
+            break
+    if not match_key:
+        match_key = "python" if "py" in s_clean else ("linux" if "lin" in s_clean else "cybersecurity_knowledge")
+
+    norm_lvl = "Intermediate"
+    for l in ["Beginner", "Intermediate", "Advanced"]:
+        if l.lower() in level.lower():
+            norm_lvl = l
+            break
+
+    cur = prof.get(match_key, {})
+    if not isinstance(cur, dict):
+        cur = {"name": match_key, "items": []}
+    cur["level"] = norm_lvl
+    prof[match_key] = cur
+    save_skills_profile(prof)
+    badge = LEVEL_BADGES.get(norm_lvl, norm_lvl)
+    res = f"✅ <b>{match_key.capitalize()}</b> darajasi <b>{badge}</b> qilib belgilandi."
+    send_message(target_id, res, build_skills_action_keyboard(), parse_mode="HTML")
+    return res
+
 async def analyze_channels_recent_posts_action(hours=24):
     from datetime import datetime, timedelta, timezone
     from intelligence.sources import get_intelligence_folder_peers
@@ -2338,7 +2390,22 @@ tools = [
             "job_city": {"type": "string", "description": "Vakansiya shahri (masalan 'Toshkent')"},
             "job_district": {"type": "string", "description": "Vakansiya tumani (masalan 'Shayxontohur')"},
             "job_format": {"type": "string", "enum": ["Remote", "Hybrid", "On-site"], "description": "Ish formati"}
-        }, "required": ["job_city"]}}}
+        }, "required": ["job_city"]}}},
+    {"type": "function", "function": {
+        "name": "show_skills_profile",
+        "description": "Foydalanuvchining ko'nikmalar profilini (universitet, kurslar, sertifikatlar, python, linux, siem, networking, ingliz/rus tili, darajalari) ko'rsatadi",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "edit_skills_profile",
+        "description": "Ko'nikmalar profilini to'ldirish yoki o'zgartirish menyusini ochadi",
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "set_skill_level",
+        "description": "Aniq bir texnik ko'nikma darajasini (Beginner, Intermediate, Advanced) belgilaydi",
+        "parameters": {"type": "object", "properties": {
+            "skill_name": {"type": "string", "description": "Ko'nikma nomi (masalan: Python, Linux, SIEM, Networking, English...)"},
+            "level": {"type": "string", "enum": ["Beginner", "Intermediate", "Advanced"], "description": "Daraja: Beginner, Intermediate yoki Advanced"}
+        }, "required": ["skill_name", "level"]}}}
 ]
 
 def call_groq(messages, use_tools=True, temperature=0.7):
@@ -2583,6 +2650,12 @@ async def get_ai_response(chat_id, user_text):
             func_result = edit_location_profile_action(chat_id)
         elif func_name == "check_job_location":
             func_result = check_job_location_action(chat_id=chat_id, **func_args)
+        elif func_name == "show_skills_profile":
+            func_result = show_skills_profile_action(chat_id)
+        elif func_name == "edit_skills_profile":
+            func_result = edit_skills_profile_action(chat_id)
+        elif func_name == "set_skill_level":
+            func_result = set_skill_level_action(chat_id=chat_id, **func_args)
 
         # ─── YANGI CONFIRM KERAK BO'LGAN FUNKSIYALAR ────────────────
         elif func_name == "request_update_name":
@@ -3148,6 +3221,14 @@ async def handle_callback(callback_query):
             send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
         return
 
+    # ─── SKILLS PROFILE CALLBACKS ─────────────────────────────────
+    if data.startswith("sk_"):
+        from skills_profile import handle_skills_callback
+        reply_txt, reply_kb = handle_skills_callback(chat_id, data)
+        if reply_txt:
+            send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
+        return
+
     # ─── ONBOARDING VA INTELLIGENCE FEEDBACK CALLBACKS ──────────────
     if data.startswith("ob_"):
         from intelligence.onboarding import handle_onboarding_callback
@@ -3637,6 +3718,19 @@ async def bot_polling_loop():
                             send_message(chat_id, ans_text, ans_kb, parse_mode="HTML")
                         continue
 
+                    # ─── AGAR SKILLS SO'ROVNOMASIDA BO'LSA ────────────────
+                    from skills_profile import is_in_skills_setup, process_skills_input, cancel_skills_setup
+                    if is_in_skills_setup(chat_id):
+                        norm_check = text.strip().lower()
+                        if norm_check in ["bekor qilish", "/cancel", "cancel", "bekor"]:
+                            cancel_skills_setup(chat_id)
+                            send_message(chat_id, "❌ Ko'nikmalar so'rovi bekor qilindi.", {"inline_keyboard": [[{"text": "🛠 Skills ko'rsatish", "callback_data": "sk_view"}]]})
+                            continue
+                        ans_text, ans_kb = process_skills_input(chat_id, text)
+                        if ans_text:
+                            send_message(chat_id, ans_text, ans_kb, parse_mode="HTML")
+                        continue
+
                     # ─── AGAR JADVAL SOZLASH JARAYONIDA BO'LSA ─────────────
                     from personal_schedule import is_in_schedule_setup, process_schedule_input, cancel_schedule_setup
                     if is_in_schedule_setup(chat_id):
@@ -3717,6 +3811,15 @@ async def bot_polling_loop():
 
                     if norm_clean in ["manzilimni o'zgartir", "manzilimni ozgartir", "joylashuvimni o'zgartir", "joylashuvimni ozgartir", "manzilni o'zgartirish", "/edit_location"]:
                         edit_location_profile_action(chat_id)
+                        continue
+
+                    # ─── SKILLS PROFILE BUYRUQLARI ────────────────────────
+                    if norm_clean in ["skills", "/skills", "ko'nikmalar", "ko'nikmalarim", "skilllarim", "skilllar", "skills profile", "skills profil", "ko'nikmalarimni ko'rsat", "skilllarimni ko'rsat", "skills ko'rsat", "darajalarim"]:
+                        show_skills_profile_action(chat_id)
+                        continue
+
+                    if norm_clean in ["skills o'zgartir", "skills ozgartir", "ko'nikmalarni o'zgartir", "ko'nikmalarni ozgartir", "skillarni o'zgartir", "/edit_skills", "skills testi", "ko'nikmalar testi", "skills sozlash"]:
+                        edit_skills_profile_action(chat_id)
                         continue
 
                     if normalized in ["/quiz", "anketa", "/anketa", "test", "/test"]:

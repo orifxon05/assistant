@@ -1,0 +1,103 @@
+{
+  "university": "Toshkent Axborot Texnologiyalari Universiteti (TATU)",
+  "courses": [
+    "Coursera (Google Cybersecurity)",
+    "Najot Ta'lim",
+    "Mustaqil ta'lim"
+  ],
+  "certifications": [
+    "CompTIA Security+ (tayyorgarlik)"
+  ],
+  "programming_languages": {
+    "name": "Dasturlash tillari",
+    "level": "Intermediate",
+    "items": [
+      "Python",
+      "Bash",
+      "SQL"
+    ]
+  },
+  "cybersecurity_knowledge": {
+    "name": "Cybersecurity bilimlari",
+    "level": "Intermediate",
+    "items": [
+      "SOC",
+      "Incident Response",
+      "Network Security"
+    ]
+  },
+  "linux": {
+    "name": "Linux",
+    "level": "Intermediate",
+    "items": [
+      "Ubuntu",
+      "Kali Linux",
+      "Bash"
+    ]
+  },
+  "networking": {
+    "name": "Networking",
+    "level": "Intermediate",
+    "items": [
+      "TCP/IP",
+      "Wireshark",
+      "OSI Model"
+    ]
+  },
+  "siem": {
+    "name": "SIEM",
+    "level": "Beginner",
+    "items": [
+      "Wazuh",
+      "Splunk"
+    ]
+  },
+  "python": {
+    "name": "Python",
+    "level": "Intermediate",
+    "items": [
+      "Telethon",
+      "Requests",
+      "Automation"
+    ]
+  },
+  "git_github": {
+    "name": "Git/GitHub",
+    "level": "Intermediate",
+    "items": [
+      "Git commands",
+      "GitHub repos"
+    ]
+  },
+  "english": {
+    "name": "Ingliz tili",
+    "level": "Intermediate",
+    "items": [
+      "Texnik hujjatlarni o'qish (B1-B2)"
+    ]
+  },
+  "russian": {
+    "name": "Rus tili",
+    "level": "Intermediate",
+    "items": [
+      "So'zlashuv (B1)"
+    ]
+  },
+  "experience": {
+    "name": "Tajriba",
+    "level": "Beginner",
+    "items": [
+      "Junior / 0-1 yil amaliyot"
+    ]
+  },
+  "portfolio_projects": [
+    "Telegram AI Assistant (Jarvis)",
+    "https://github.com/orifxon05"
+  ],
+  "metadata": {
+    "version": "1.0",
+    "created_at": "2026-10-06T08:30:00",
+    "updated_at": "2026-10-06T08:37:11.087657",
+    "is_configured": true
+  }
+}
