@@ -354,11 +354,11 @@ def build_menu_keyboard():
                 {"text": ("\u2705 " if not enabled else "") + "\U0001f7e2 Men onlaynman", "callback_data": "set_online"},
                 {"text": ("\u2705 " if enabled else "") + "\U0001f534 Men oflaynman", "callback_data": "set_offline"}
             ],
+            [{"text": f"\U0001f3af Filtr: {mode_label}", "callback_data": "open_filter"}],
             [
                 {"text": "📊 Kanallarni tahlil qilish (24s)", "callback_data": "run_full_analysis"},
                 {"text": "🎯 Qiziqishlar testi", "callback_data": "pt_start_test"}
             ],
-            [{"text": f"\U0001f3af Filtr: {mode_label}", "callback_data": "open_filter"}],
             [
                 {"text": "🗓 Vaqt jadvalim", "callback_data": "sc_view"},
                 {"text": "⏳ Qachon bo'shman?", "callback_data": "sc_free_today"}
@@ -369,29 +369,40 @@ def build_menu_keyboard():
             ],
             [
                 {"text": "📂 Intelligence holati", "callback_data": "quick_intel"},
-                {"text": "\U0001f512 Maxfiylik", "callback_data": "quick_privacy"}
+                {"text": "⚙️ Telegram sozlamalari", "callback_data": "open_tg_settings"}
+            ],
+            [
+                {"text": "🔄 Yangilash (GitHub)", "callback_data": "trigger_ota_update"},
+                {"text": "ℹ️ Versiya va Tizim holati", "callback_data": "quick_version"}
+            ]
+        ]
+    }
+
+def build_tg_settings_keyboard():
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "\U0001f512 Maxfiylik", "callback_data": "quick_privacy"},
+                {"text": "\U0001f6e1 2FA holati", "callback_data": "quick_2fa"}
             ],
             [
                 {"text": "\U0001f4e2 Kanallar", "callback_data": "quick_channels"},
                 {"text": "\U0001f465 Guruhlar", "callback_data": "quick_groups"}
             ],
             [
-                {"text": "\U0001f510 Seanslar", "callback_data": "quick_sessions"}
+                {"text": "\U0001f510 Seanslar", "callback_data": "quick_sessions"},
+                {"text": "\U0001f6ab Bloklanganlar", "callback_data": "quick_blocked"}
             ],
             [
-                {"text": "\U0001f6ab Bloklanganlar", "callback_data": "quick_blocked"},
-                {"text": "\U0001f4c1 Papkalar", "callback_data": "quick_folders"}
-            ],
-            [
-                {"text": "\u23f3 Akkaunt muddati", "callback_data": "quick_ttl"},
+                {"text": "\U0001f4c1 Papkalar", "callback_data": "quick_folders"},
                 {"text": "\U0001f514 Bildirishnomalar", "callback_data": "quick_notifications"}
             ],
             [
-                {"text": "\U0001f6e1 2FA holati", "callback_data": "quick_2fa"},
-                {"text": "🔄 Yangilash (GitHub)", "callback_data": "trigger_ota_update"}
+                {"text": "\u23f3 Akkaunt muddati (TTL)", "callback_data": "quick_ttl"},
+                {"text": "👤 Profil ma'lumotlari", "callback_data": "quick_profile"}
             ],
             [
-                {"text": "ℹ️ Versiya va Tizim holati", "callback_data": "quick_version"}
+                {"text": "⬅️ Asosiy menyu", "callback_data": "open_menu"}
             ]
         ]
     }
@@ -3158,6 +3169,15 @@ async def handle_callback(callback_query):
         send_message(chat_id, f"Hozirgi holat: {status_text}\n\nHolatni tanlang:", build_menu_keyboard())
         return
 
+    if data == "open_tg_settings":
+        send_message(
+            chat_id,
+            "⚙️ <b>Telegram Hisob Sozlamalari</b>\n\nQuyidagi bo'limlardan birini tanlang:",
+            build_tg_settings_keyboard(),
+            parse_mode="HTML"
+        )
+        return
+
     if data == "intel_fb_like":
         from intelligence.preferences import record_feedback
         record_feedback("Post", "like", "Foydalanuvchi ma'qulladi")
@@ -3219,54 +3239,63 @@ async def handle_callback(callback_query):
         send_message(chat_id, "Kontakt ism(lar)ini vergul bilan ajratib yozing (masalan: volidam, shoxrux):")
         return
 
+    tg_sub_back_kb = {
+        "inline_keyboard": [
+            [
+                {"text": "⬅️ TG sozlamalari", "callback_data": "open_tg_settings"},
+                {"text": "📂 Asosiy menyu", "callback_data": "open_menu"}
+            ]
+        ]
+    }
+
     if data == "quick_profile":
         res = await get_my_profile_action()
-        send_message(chat_id, res)
+        send_message(chat_id, res, tg_sub_back_kb)
         return
 
     if data == "quick_privacy":
         res = await get_all_privacy_action()
-        send_message(chat_id, res)
+        send_message(chat_id, res, tg_sub_back_kb)
         return
 
     if data == "quick_channels":
         res = await get_my_channels_action(limit=25)
-        send_message(chat_id, res)
+        send_message(chat_id, res, tg_sub_back_kb)
         return
 
     if data == "quick_groups":
         res = await get_my_groups_action(limit=25)
-        send_message(chat_id, res)
+        send_message(chat_id, res, tg_sub_back_kb)
         return
 
     if data == "quick_sessions":
         res = await get_active_sessions_action()
-        send_message(chat_id, res)
+        send_message(chat_id, res, tg_sub_back_kb)
         return
 
     if data == "quick_blocked":
         res = await get_blocked_contacts_action()
-        send_message(chat_id, res)
+        send_message(chat_id, res, tg_sub_back_kb)
         return
 
     if data == "quick_folders":
         res = await get_chat_folders_action()
-        send_message(chat_id, res)
+        send_message(chat_id, res, tg_sub_back_kb)
         return
 
     if data == "quick_ttl":
         res = await get_account_ttl_action()
-        send_message(chat_id, res)
+        send_message(chat_id, res, tg_sub_back_kb)
         return
 
     if data == "quick_notifications":
         res = await get_global_notification_settings_action()
-        send_message(chat_id, res)
+        send_message(chat_id, res, tg_sub_back_kb)
         return
 
     if data == "quick_2fa":
         res = await get_password_status_action()
-        send_message(chat_id, res)
+        send_message(chat_id, res, tg_sub_back_kb)
         return
 
     action = pending_actions.get(chat_id)
@@ -3723,6 +3752,16 @@ async def bot_polling_loop():
                         status_text = "\U0001f7e2 Onlaynsiz" if not is_autoreply_enabled() else "\U0001f534 Oflaynsiz (avtojavob yoqilgan)"
                         send_message(chat_id, f"Hozirgi holat: {status_text}\n\nHolatni tanlang:", build_menu_keyboard())
                         continue
+
+                    if norm_clean in ["tg sozlamalari", "telegram sozlamalari", "tg sozlamalar", "telegram sozlamalar", "/tg_settings", "/settings", "sozlamalar"] or normalized in ["/tg_settings", "/settings"]:
+                        send_message(
+                            chat_id,
+                            "⚙️ <b>Telegram Hisob Sozlamalari</b>\n\nQuyidagi bo'limlardan birini tanlang:",
+                            build_tg_settings_keyboard(),
+                            parse_mode="HTML"
+                        )
+                        continue
+
 
                 pending = pending_actions.get(chat_id)
                 if pending and pending.get("type") == "awaiting_filter_names":
