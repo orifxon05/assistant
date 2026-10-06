@@ -13,7 +13,7 @@ mkdir -p .update_backup
 [ -f ".env" ] && cp ".env" .update_backup/
 [ -f "profile.json" ] && cp "profile.json" .update_backup/
 cp *.session* .update_backup/ 2>/dev/null
-cp contacts.json history.json todos.json autoreply_state.json status.json action_history.json intelligence_*.json .update_backup/ 2>/dev/null
+cp contacts.json history.json todos.json autoreply_state.json status.json action_history.json intelligence_*.json personal_profile.json schedule.json location_profile.json skills_profile.json .update_backup/ 2>/dev/null
 
 REPO_URL="https://github.com/orifxon05/assistant.git"
 UPDATED=0
@@ -90,6 +90,10 @@ if [ -d ".update_backup" ]; then
     cp .update_backup/status.json . 2>/dev/null
     cp .update_backup/action_history.json . 2>/dev/null
     cp .update_backup/intelligence_*.json . 2>/dev/null
+    cp .update_backup/personal_profile.json . 2>/dev/null
+    cp .update_backup/schedule.json . 2>/dev/null
+    cp .update_backup/location_profile.json . 2>/dev/null
+    cp .update_backup/skills_profile.json . 2>/dev/null
     rm -rf .update_backup
 fi
 
@@ -112,6 +116,8 @@ if python -m py_compile bot.py 2>/dev/null; then
     echo "✅ Sintaksis tekshiruvidan muvaffaqiyatli o'tdi!"
 else
     echo "⚠️ Diqqat: bot.py faylida xatolik aniqlandi."
+fi
+
 # Termux 'jarvis' buyrug'ini doim to'g'ri ishlashi uchun yangilab qo'yish:
 if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
     cat > "$PREFIX/bin/jarvis" << RUNNEREOF
@@ -135,7 +141,7 @@ if [ -d ".git" ]; then
     COMMIT_INFO=$(git log -1 --pretty=format:"%h - %s (%cd)" --date=short 2>/dev/null)
     echo "📌 O'rnatilgan commit: $COMMIT_INFO"
 fi
-echo "📦 Dastur versiyasi: v2.2"
+echo "📦 Dastur versiyasi: v2.3"
 echo ""
 echo "👉 Yangi versiyani ishga tushirish uchun:"
 echo "   pkill -f 'python.*bot.py' 2>/dev/null"
