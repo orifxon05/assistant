@@ -86,13 +86,17 @@ async def run_intelligence_check(telethon_client, send_bot_message_func=None, ad
 
                     # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
                     if score >= 75:
+                        from .digest import generate_vacancy_digest_reason
+                        why_reason = generate_vacancy_digest_reason(match_result)
                         record_daily_item(
                             title=match_result.get("vacancy_summary", {}).get("title", "Vakansiya"),
                             company=match_result.get("vacancy_summary", {}).get("company", ""),
                             link=post_link,
                             category="Vakansiya",
                             score=score,
-                            level="URGENT" if score >= 90 else "USEFUL"
+                            level="URGENT" if score >= 90 else "USEFUL",
+                            why_match=why_reason,
+                            source=title
                         )
                         relevant_found.append((title, match_result))
                         msg_text, keyboard = format_matched_vacancy_notification(match_result, source_title=title, post_link=post_link)
@@ -119,13 +123,17 @@ async def run_intelligence_check(telethon_client, send_bot_message_func=None, ad
 
                     # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
                     if score >= 75:
+                        why_list = analysis.get("why_matches", [])
+                        why_reason = ", ".join(why_list[:2]) if why_list else "Profilingizga mos imkoniyat"
                         record_daily_item(
                             title=analysis.get("title", "Imkoniyat"),
                             company=analysis.get("company", ""),
                             link=post_link,
                             category=",".join(analysis.get("categories", [])),
                             score=score,
-                            level=level
+                            level=level,
+                            why_match=why_reason,
+                            source=title
                         )
                         relevant_found.append((title, analysis))
                         msg_text, keyboard = format_intelligence_message(analysis, source_title=title, post_link=post_link)

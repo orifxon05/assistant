@@ -181,19 +181,51 @@ def format_intelligence_message(analysis_data, source_title="Kanal", post_link="
 
 def format_digest_message(date_str, stats_dict, top_items):
     """
-    Kunlik xulosa (Daily Digest) xabarini formatlaydi.
+    Kunlik qisqa Intelligence Digest (Hisobot) xabarini formatlaydi.
+    Foydalanuvchi talab qilgan aniq struktura:
+    📊 BUGUNGI HISOBOT
+
+    💼 Vakansiya: 5
+    🎓 Internship: 2
+    🛡 Cybersecurity: 4
+    🤖 AI: 2
+    🎓 Ta'lim: 1
+
+    🔥 Eng yaxshi 3 ta:
+
+    1. SOC Intern
+    • Nega senga mos: ...
+    🔗 Original link
     """
-    lines = []
-    lines.append(f"📊 <b>BUGUNGI INTELLIGENCE XULOSASI ({date_str})</b>\n")
-    for cat, count in stats_dict.items():
-        if count > 0:
-            lines.append(f"• {cat}: {count} ta")
+    lines = [
+        "📊 <b>BUGUNGI HISOBOT</b>\n",
+        f"💼 Vakansiya: {stats_dict.get('vakansiya', 0)}",
+        f"🎓 Internship: {stats_dict.get('internship', 0)}",
+        f"🛡 Cybersecurity: {stats_dict.get('cybersecurity', 0)}",
+        f"🤖 AI: {stats_dict.get('ai', 0)}",
+        f"🎓 Ta'lim: {stats_dict.get('education', 0)}\n"
+    ]
 
-    if top_items:
-        lines.append("\n⭐ <b>Eng asosiy topilmalar:</b>")
-        for idx, item in enumerate(top_items[:5], 1):
-            lines.append(f"{idx}. <b>{item.get('title', 'Imkoniyat')}</b> ({item.get('company', '')}) - {item.get('link', '')}")
+    relevant_top = [it for it in top_items if it.get("score", 0) >= 75][:3]
+
+    if relevant_top:
+        lines.append("🔥 <b>Eng yaxshi 3 ta:</b>\n")
+        for idx, item in enumerate(relevant_top, 1):
+            title = item.get("title", "Imkoniyat")
+            comp = item.get("company")
+            comp_str = f" — {comp}" if comp and comp not in ["Ko'rsatilmagan", "Noma'lum", ""] else ""
+            why = item.get("why_match") or "Profilingizga va qiziqishlaringizga mos"
+            link = item.get("link")
+
+            lines.append(f"{idx}. <b>{title}</b>{comp_str}")
+            lines.append(f"• <i>Nega senga mos:</i> {why}")
+            if link and (link.startswith("http") or link.startswith("https")):
+                lines.append(f"🔗 <a href='{link}'>Original link</a>\n")
+            elif link and link.startswith("@"):
+                lines.append(f"🔗 <b>Aloqa:</b> {link}\n")
+            else:
+                lines.append("")
     else:
-        lines.append("\nBugun yangi muhim e'lonlar chiqmadi.")
+        lines.append("<i>Bugun 75+ ballik yangi imkoniyatlar chiqmadi. Kuzatuv davom etmoqda...</i>")
 
-    return "\n".join(lines)
+    return "\n".join(lines).strip()

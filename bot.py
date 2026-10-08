@@ -1966,6 +1966,18 @@ async def analyze_channels_recent_posts_action(hours=24):
 
                     # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
                     if score >= 75:
+                        from intelligence.digest import record_daily_item, generate_vacancy_digest_reason
+                        why_reason = generate_vacancy_digest_reason(match_result)
+                        record_daily_item(
+                            title=match_result.get("vacancy_summary", {}).get("title", "Vakansiya"),
+                            company=match_result.get("vacancy_summary", {}).get("company", ""),
+                            link=post_link,
+                            category="Vakansiya",
+                            score=score,
+                            level="URGENT" if score >= 90 else "USEFUL",
+                            why_match=why_reason,
+                            source=title
+                        )
                         formatted_txt, kb = format_matched_vacancy_notification(match_result, source_title=title, post_link=post_link)
                         send_message(ADMIN_ID, formatted_txt, kb, parse_mode="HTML")
                         beneficial_posts.append((title, match_result.get("vacancy_summary", {}).get("title", "Vakansiya")))
@@ -1976,6 +1988,19 @@ async def analyze_channels_recent_posts_action(hours=24):
 
                     # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
                     if score >= 75:
+                        from intelligence.digest import record_daily_item
+                        why_list = analysis.get("why_matches", [])
+                        why_reason = ", ".join(why_list[:2]) if why_list else "Profilingizga mos imkoniyat"
+                        record_daily_item(
+                            title=analysis.get("title", "Imkoniyat"),
+                            company=analysis.get("company", ""),
+                            link=post_link,
+                            category=",".join(analysis.get("categories", [])),
+                            score=score,
+                            level=analysis.get("level", "USEFUL"),
+                            why_match=why_reason,
+                            source=title
+                        )
                         formatted_txt, kb = format_intelligence_message(analysis, source_title=title, post_link=post_link)
                         send_message(ADMIN_ID, formatted_txt, kb, parse_mode="HTML")
                         beneficial_posts.append((title, analysis.get("title", "")))
@@ -3917,6 +3942,12 @@ async def bot_polling_loop():
                             res = await analyze_channels_recent_posts_action(hours=24)
                             send_message(ADMIN_ID, res)
                         asyncio.create_task(_do_analysis_cmd())
+                        continue
+
+                    if norm_clean in ["/digest", "digest", "hisobot", "/hisobot", "bugungi hisobot", "kunlik hisobot", "kunlik hisobotim", "kunlik xulosa", "/kunlik_xulosa"]:
+                        from intelligence.digest import get_today_digest
+                        digest_txt = get_today_digest()
+                        send_message(chat_id, digest_txt, parse_mode="HTML")
                         continue
 
                     if normalized in ["/update", "update", "/yangila", "yangila"]:
