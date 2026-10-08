@@ -3037,7 +3037,8 @@ async def get_ai_response(chat_id, user_text):
     return final_reply, None
 
 CONVERSATION_TIMEOUT = 10 * 60
-MAX_AUTOREPLY_PER_SESSION = 2
+DAILY_AUTOREPLY_LIMIT = 30
+MAX_AUTOREPLY_PER_SESSION = DAILY_AUTOREPLY_LIMIT
 MIN_REPLY_INTERVAL = 3.0
 
 def is_bot_or_assistant_message(text):
@@ -3083,7 +3084,9 @@ async def get_autoreply(chat_key, sender_name, user_text):
         return None
 
     import time
+    from datetime import datetime
     now_ts = time.time()
+    today_str = datetime.now().strftime("%Y-%m-%d")
 
     # 1. Boshqa bot yoki assistent ekanligini aniqlash (cheksiz bot-to-bot siklni to'xtatish):
     if is_bot_or_assistant_message(user_text):
@@ -3094,18 +3097,24 @@ async def get_autoreply(chat_key, sender_name, user_text):
     chat_data = state.get(chat_key, {
         "introduced": False, "history": [],
         "last_message_time": now_ts, "last_reply_time": 0, "conversation_active": True,
-        "sender_name": sender_name, "count": 0
+        "sender_name": sender_name, "count": 0, "date": today_str
     })
     chat_data.setdefault("history", [])
     chat_data.setdefault("conversation_active", True)
     chat_data.setdefault("sender_name", sender_name)
     chat_data.setdefault("count", 0)
     chat_data.setdefault("last_reply_time", 0)
+    chat_data.setdefault("date", today_str)
+
+    # Kun almashganda (yangi sana kelganda) hisoblagich avtomatik nolga tushadi
+    saved_date = chat_data.get("date") or chat_data.get("last_date")
+    if saved_date != today_str:
+        chat_data["count"] = 0
+        chat_data["date"] = today_str
 
     # 2. Sessiya taymauti: agar oxirgi xabardan beri CONVERSATION_TIMEOUT o'tgan bo'lsa, yangi sessiya ochamiz
     last_msg_time = chat_data.get("last_message_time", 0)
     if last_msg_time > 0 and (now_ts - last_msg_time) >= CONVERSATION_TIMEOUT:
-        chat_data["count"] = 0
         chat_data["introduced"] = False
         chat_data["history"] = []
         chat_data["conversation_active"] = True
@@ -3124,8 +3133,8 @@ async def get_autoreply(chat_key, sender_name, user_text):
         save_autoreply_state(state)
         return None
 
-    # 5. Bir sessiya uchun qat'iy javob berish cheklovi (maksimal 2 ta javob)
-    if chat_data["count"] >= MAX_AUTOREPLY_PER_SESSION:
+    # 5. Har bir kontakt uchun kunlik javob berish cheklovi (kuniga maksimal 30 ta javob)
+    if chat_data["count"] >= DAILY_AUTOREPLY_LIMIT:
         print(f"[AUTOREPLY] {sender_name} uchun suhbat limiti tugadi ({chat_data['count']} ta javob berilgan).")
         return None
 
@@ -3158,6 +3167,7 @@ async def get_autoreply(chat_key, sender_name, user_text):
     chat_data["history"] = chat_data["history"][-MAX_AUTOREPLY_HISTORY:]
     chat_data["count"] = chat_data.get("count", 0) + 1
     chat_data["last_reply_time"] = time.time()
+    chat_data["date"] = today_str
 
     state[chat_key] = chat_data
     save_autoreply_state(state)
