@@ -3078,6 +3078,10 @@ def is_closing_courtesy(text):
     return (courtesy_count / len(words)) >= 0.5
 
 async def get_autoreply(chat_key, sender_name, user_text):
+    # Admin o'zi yoki Saved Messages bo'lsa auto-reply ishlamaydi
+    if ADMIN_ID and (str(chat_key) == str(ADMIN_ID) or chat_key == ADMIN_ID):
+        return None
+
     import time
     now_ts = time.time()
 
@@ -3768,10 +3772,14 @@ async def autoreply_handler(event):
             return
         if not is_autoreply_enabled():
             return
+        if event.sender_id and (event.sender_id == ADMIN_ID or str(event.sender_id) == str(ADMIN_ID)):
+            return
+        if event.chat_id and (event.chat_id == ADMIN_ID or str(event.chat_id) == str(ADMIN_ID)):
+            return
         sender = await event.get_sender()
         if not sender or getattr(sender, "bot", False):
             return
-        if getattr(sender, "is_self", False) or sender.id == ADMIN_ID:
+        if sender.id == ADMIN_ID or str(sender.id) == str(ADMIN_ID) or getattr(sender, "is_self", False):
             return
         if not should_autoreply_to_sender(sender):
             return
