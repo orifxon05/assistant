@@ -2502,7 +2502,14 @@ def call_groq(messages, use_tools=True, temperature=0.7):
                     code = err_info.get("code")
                     msg = err_info.get("message", "")
                     print(f"[GROQ {current_model} - Urinish {attempt + 1}]: {code or msg}")
-                    if code == "rate_limit_exceeded" or "rate limit" in str(msg).lower() or "tokens per day" in str(msg).lower():
+                    if code == "rate_limit_exceeded" or "rate limit" in str(msg).lower() or "tokens per day" in str(msg).lower() or "tpd" in str(msg).lower():
+                        if "tokens per day" in str(msg).lower() or "tpd" in str(msg).lower():
+                            print(f"[GROQ] Kunlik token limiti (TPD) tugaganligi aniqlandi. Intelligence monitoring bugun uchun to'xtatiladi.")
+                            try:
+                                from intelligence.state import set_daily_tpd_paused
+                                set_daily_tpd_paused(True)
+                            except Exception:
+                                pass
                         print(f"[GROQ] {current_model} limiti band, keyingi zaxira modelga o'tilmoqda...")
                         break
                     import time

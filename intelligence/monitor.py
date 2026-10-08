@@ -2,7 +2,10 @@ import asyncio
 import time
 from datetime import datetime
 from .sources import get_intelligence_folder_peers, ensure_intelligence_folder
-from .state import get_channel_last_id, update_channel_state, is_message_seen, mark_message_seen
+from .state import (
+    get_channel_last_id, update_channel_state, is_message_seen, mark_message_seen,
+    is_daily_tpd_paused, set_daily_tpd_paused
+)
 from .preferences import load_preferences, get_check_interval, is_intelligence_enabled
 from .analyzer import analyze_post_with_ai
 from .formatter import format_intelligence_message
@@ -14,6 +17,10 @@ async def run_intelligence_check(telethon_client, send_bot_message_func=None, ad
     """
     Barcha '📂 Intelligence' papkasidagi kanallarni bir martalik to'liq tekshirish va tahlil qilish.
     """
+    if is_daily_tpd_paused():
+        print("[MONITOR] Groq kunlik token limiti (TPD) tugaganligi sababli bugungi tekshiruvlar to'xtatilgan (ertagacha kutilmoqda).")
+        return 0, []
+
     peers, folder_title = await get_intelligence_folder_peers(telethon_client)
     if not peers:
         print("[MONITOR] '📂 Intelligence' papkasida hali hech qanday kanal topilmadi.")
@@ -120,6 +127,12 @@ async def run_intelligence_check(telethon_client, send_bot_message_func=None, ad
                     analysis = analyze_post_with_ai(msg.text, channel_title=title, channel_intent=channel_intent)
                     await asyncio.sleep(4)
 
+                    # Agar Groq kunlik token limiti (TPD) tugagan bo'lsa, monitoringni bugun uchun darhol to'xtatamiz
+                    if analysis.get("daily_tpd_exceeded") or "tokens per day" in str(analysis.get("error", "")).lower() or "tpd" in str(analysis.get("error", "")).lower():
+                        print("[MONITOR] Groq kunlik token limiti (TPD) aniqlandi! Qolgan barcha tekshiruvlar bugun uchun to'xtatildi.")
+                        set_daily_tpd_paused(True)
+                        return processed_count, relevant_found
+
                     score = analysis.get("relevance_score", 0)
                     level = analysis.get("level", "IGNORE")
 
@@ -175,8 +188,31 @@ async def intelligence_monitor_loop(telethon_client, send_bot_message_func, admi
 
     while True:
         try:
+            now = datetime.now()
+            today_str = now.strftime("%Y-%m-%d")
+            prefs = load_preferences()
+
+            # Check daily digest (e.g. at 21:00)
+            digest_enabled = prefs.get("daily_digest_enabled", True)
+            digest_target_hour = int(prefs.get("daily_digest_time", "21:00").split(":")[0])
+
+            if digest_enabled and now.hour == digest_target_hour and LAST_DIGEST_DATE != today_str:
+                LAST_DIGEST_DATE = today_str
+                digest_text = get_today_digest()
+                if send_bot_message_func and admin_id:
+                    try:
+                        send_bot_message_func(admin_id, digest_text, parse_mode="HTML")
+                    except Exception as e:
+                        print("[MONITOR] Kunlik xulosa yuborishda xatolik:", e)
+
+            # Kunlik token limiti (TPD) tugagan bo'lsa, monitoring shu kun uchun to'xtaydi
+            # va faqat ertangi kunda (sana almashganda) qayta uyg'onadi
+            if is_daily_tpd_paused():
+                print(f"[INTELLIGENCE] Groq kunlik token limiti (TPD) tugagan. Bugungi ({today_str}) monitoring to'xtatildi. Ertaga yangi sana kelganda avtomatik qayta boshlanadi.")
+                await asyncio.sleep(30 * 60)
+                continue
+
             if is_intelligence_enabled():
-                prefs = load_preferences()
                 dry_run = prefs.get("dry_run", False)
                 count, found = await run_intelligence_check(
                     telethon_client,
@@ -186,21 +222,6 @@ async def intelligence_monitor_loop(telethon_client, send_bot_message_func, admi
                 )
                 if count > 0:
                     print(f"[INTELLIGENCE] {count} ta post tahlil qilindi, {len(found)} ta mos keluvchi topildi.")
-
-                # Check daily digest (e.g. at 21:00)
-                now = datetime.now()
-                today_str = now.strftime("%Y-%m-%d")
-                digest_enabled = prefs.get("daily_digest_enabled", True)
-                digest_target_hour = int(prefs.get("daily_digest_time", "21:00").split(":")[0])
-
-                if digest_enabled and now.hour == digest_target_hour and LAST_DIGEST_DATE != today_str:
-                    LAST_DIGEST_DATE = today_str
-                    digest_text = get_today_digest()
-                    if send_bot_message_func and admin_id:
-                        try:
-                            send_bot_message_func(admin_id, digest_text, parse_mode="HTML")
-                        except Exception as e:
-                            print("[MONITOR] Kunlik xulosa yuborishda xatolik:", e)
 
             # BARCHA kanallar (barcha entity) tekshirilib bo'lgandan KEYIN
             # asosiy while-tsiklida belgilangan interval bo'yicha kutish:

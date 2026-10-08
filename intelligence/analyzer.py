@@ -136,8 +136,23 @@ Quyidagi Telegram postini tahlil qil va faqat JSON qaytar:
             else:
                 print("[ANALYZER] AI javobi JSON ga aylanmadi")
         elif "error" in data:
-            err_msg = data["error"].get("message", "")
+            err_msg = str(data["error"].get("message", ""))
+            err_code = str(data["error"].get("code", ""))
             print("[ANALYZER GROQ XATO]:", err_msg)
+            if "tokens per day" in err_msg.lower() or "tpd" in err_msg.lower() or ("rate_limit_exceeded" in err_code and "per day" in err_msg.lower()):
+                print("[ANALYZER] Groq kunlik token limiti (TPD) tugaganligi aniqlandi! Monitoring bugungi kun uchun to'xtatiladi.")
+                try:
+                    from .state import set_daily_tpd_paused
+                    set_daily_tpd_paused(True)
+                except Exception:
+                    pass
+                return {
+                    "is_relevant": False,
+                    "relevance_score": 0,
+                    "level": "IGNORE",
+                    "daily_tpd_exceeded": True,
+                    "error": f"Groq TPD kunlik limiti tugadi: {err_msg}"
+                }
             if "rate limit" in err_msg.lower() or data["error"].get("code") == "rate_limit_exceeded":
                 import time
                 time.sleep(5)

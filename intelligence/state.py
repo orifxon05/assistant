@@ -92,3 +92,26 @@ def mark_message_seen(text, msg_id=None, chat_id=None):
     if msg_id and chat_id:
         seen.add(f"{chat_id}:{msg_id}")
     save_seen_hashes(seen)
+
+def is_daily_tpd_paused():
+    """
+    Groq kunlik token limiti (TPD) tugaganligi sababli monitoring bugun uchun
+    to'xtatilganligini tekshiradi. Kun almashganda (ertaga) avtomatik False bo'ladi.
+    """
+    from datetime import datetime
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    state = load_intelligence_state()
+    return state.get("daily_tpd_pause_date") == today_str
+
+def set_daily_tpd_paused(paused=True):
+    """
+    Kunlik TPD limiti tugaganda monitoringni bugungi sana uchun pauzaga qo'yadi.
+    """
+    from datetime import datetime
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    state = load_intelligence_state()
+    if paused:
+        state["daily_tpd_pause_date"] = today_str
+    else:
+        state.pop("daily_tpd_pause_date", None)
+    save_intelligence_state(state)
