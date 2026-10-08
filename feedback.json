@@ -1,0 +1,40 @@
+{
+  "version": "1.0",
+  "updated_at": "2026-10-08T16:00:00",
+  "stats": {
+    "total_feedbacks": 0,
+    "kerak_count": 0,
+    "kerak_emas_count": 0,
+    "juda_foydali_count": 0
+  },
+  "boosted_keywords": [
+    "soc",
+    "siem",
+    "cybersecurity",
+    "kiberxavfsizlik",
+    "incident response"
+  ],
+  "disliked_keywords": [],
+  "topic_weights": {
+    "soc": {
+      "bonus": 15,
+      "penalty": 0,
+      "status": "high_priority",
+      "count": 1
+    },
+    "siem": {
+      "bonus": 12,
+      "penalty": 0,
+      "status": "high_priority",
+      "count": 1
+    },
+    "cybersecurity": {
+      "bonus": 10,
+      "penalty": 0,
+      "status": "boosted",
+      "count": 1
+    }
+  },
+  "registered_items": {},
+  "history": []
+}

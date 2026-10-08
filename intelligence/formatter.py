@@ -71,6 +71,11 @@ def format_matched_vacancy_notification(match_result, source_title="Kanal", post
         clean_skills = [s.split("[")[0].strip() for s in matched_skills[:3]]
         reasons.append(f"• Ko'nikmalar: {', '.join(clean_skills)}")
 
+    # 6. Foydalanuvchi feedbackidan kelib chiqqan ustuvorlik
+    fb_reasons = match_result.get("feedback_reasons", [])
+    for fr in fb_reasons:
+        reasons.append(f"• {fr}")
+
     lines = [
         f"{header}\n",
         f"💼 <b>{title}</b>",
@@ -96,18 +101,18 @@ def format_matched_vacancy_notification(match_result, source_title="Kanal", post
 
     text = "\n".join(lines)
 
-    # Inline feedback buttons
-    keyboard = {
-        "inline_keyboard": [
-            [
-                {"text": "👍 Foydali", "callback_data": "intel_fb_like"},
-                {"text": "👎 Keraksiz", "callback_data": "intel_fb_dislike"}
-            ],
-            [
-                {"text": "🚫 Bu manbani o'chir", "callback_data": "intel_src_mute"}
-            ]
-        ]
-    }
+    # Inline feedback tugmalari (✅ Kerak, ❌ Kerak emas, ⭐ Juda foydali)
+    from feedback_manager import register_opportunity, build_feedback_keyboard
+    opp_id = register_opportunity(
+        title=title,
+        company=company,
+        category=v.get("category", "Vakansiya"),
+        skills=matched_skills,
+        source=source_title,
+        score=score,
+        link=link_url
+    )
+    keyboard = build_feedback_keyboard(opp_id)
     return text, keyboard
 
 
@@ -160,17 +165,17 @@ def format_intelligence_message(analysis_data, source_title="Kanal", post_link="
 
     text = "\n".join(lines)
 
-    keyboard = {
-        "inline_keyboard": [
-            [
-                {"text": "👍 Foydali", "callback_data": "intel_fb_like"},
-                {"text": "👎 Keraksiz", "callback_data": "intel_fb_dislike"}
-            ],
-            [
-                {"text": "🚫 Bu manbani o'chir", "callback_data": "intel_src_mute"}
-            ]
-        ]
-    }
+    # Inline feedback tugmalari (✅ Kerak, ❌ Kerak emas, ⭐ Juda foydali)
+    from feedback_manager import register_opportunity, build_feedback_keyboard
+    opp_id = register_opportunity(
+        title=title,
+        company=company,
+        category=",".join(analysis_data.get("categories", [])) or "Imkoniyat",
+        source=source_title,
+        score=score,
+        link=post_link
+    )
+    keyboard = build_feedback_keyboard(opp_id)
     return text, keyboard
 
 

@@ -586,14 +586,29 @@ def match_vacancy_with_profile(vacancy_input):
     )
     overall_score = int(round(weighted_score))
 
+    # 4.5. FEEDBACK ASOSIDA DINAMIK MOSLASH (feedback.json)
+    # Foydalanuvchining avvalgi ✅ Kerak, ❌ Kerak emas, ⭐ Juda foydali fikrlari hisobga olinadi.
+    from feedback_manager import apply_feedback_adjustments
+    raw_v_text = vacancy_input if isinstance(vacancy_input, str) else json.dumps(v_data, ensure_ascii=False)
+    fb_adj = apply_feedback_adjustments(
+        item_title=v_data.get("title") or v_data.get("lavozim") or "",
+        skills=v_data.get("skills_required") or [],
+        full_text=raw_v_text,
+        category="Vakansiya",
+        base_score=overall_score
+    )
+    overall_score = fb_adj["final_score"]
+    feedback_reasons = fb_adj.get("reasons", [])
+    is_fb_suppressed = fb_adj.get("is_suppressed", False)
+
     # 5. QAT'IY QOIDA: Agar vaqt jiddiy to'qnashsa (masalan 4 soat o'qish bilan),
-    # umumiy natija hech qachon "Juda mos" yoki "Mos" bo'la olmaydi!
+    # yoki foydalanuvchi "Kerak emas" deb belgilagan bo'lsa, mos emas deb qaytariladi!
     has_time_conflict = c_schedule.get("has_conflict", False)
     conflict_hours = c_schedule.get("conflict_hours", 0)
 
-    if has_time_conflict and conflict_hours >= 2:
+    if (has_time_conflict and conflict_hours >= 2) or (is_fb_suppressed and fb_adj.get("penalty", 0) >= 25):
         overall_status = "🔴 Mos emas"
-        status_note = "Vaqt jiddiy to'qnashadi"
+        status_note = "Filtrlangan yoki vaqt to'qnashadi"
     elif overall_score >= 80 and not has_time_conflict:
         overall_status = "🔥 Juda mos"
         status_note = "Ajoyib moslik"
@@ -613,6 +628,8 @@ def match_vacancy_with_profile(vacancy_input):
         "status_note": status_note,
         "has_time_conflict": has_time_conflict,
         "conflict_hours": conflict_hours,
+        "feedback_reasons": feedback_reasons,
+        "feedback_adjustment": fb_adj,
         "criteria": {
             "interest": c_interest,
             "schedule": c_schedule,

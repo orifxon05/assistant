@@ -125,6 +125,8 @@ QAT'IY QOIDALAR:
    - Shaxsiy ko'nikmalar (Skills Profile)ni ko'rish (universitet, kurslar, sertifikatlar, python, linux, siem, networking, tillar, darajalar) -> 'show_skills_profile'
    - Ko'nikmalar profilini o'zgartirish/sozlash -> 'edit_skills_profile'
    - Aniq bir skill darajasini (Beginner, Intermediate, Advanced) belgilash -> 'set_skill_level'
+   - Vakansiya va imkoniyatlar bo'yicha feedback (ko'proq yubor, kerak emas) -> 'adjust_opportunity_feedback'
+   - Feedbacklar va ustuvorliklar holatini ko'rish -> 'get_opportunity_feedback_summary'
  7. HECH QACHON RAD ETMA:
    - {name} Telegram ichidagi biror ish qilishni buyursa, HECH QACHON "Men buni qila olmayman", "Bu funksiya mavjud emas", "Bu imkonsiz" kabi rad javoblarni berma!
    - Agar {name} "kanallarni tahlil qil", "24 soat ichida yozilgan postlardan manfaatlisini tashla" kabi topshiriq bersa -> DARHOL 'analyze_channels_recent_posts' funksiyasini chaqir!
@@ -2426,7 +2428,19 @@ tools = [
         "parameters": {"type": "object", "properties": {
             "skill_name": {"type": "string", "description": "Ko'nikma nomi (masalan: Python, Linux, SIEM, Networking, English...)"},
             "level": {"type": "string", "enum": ["Beginner", "Intermediate", "Advanced"], "description": "Daraja: Beginner, Intermediate yoki Advanced"}
-        }, "required": ["skill_name", "level"]}}}
+        }, "required": ["skill_name", "level"]}}},
+    {"type": "function", "function": {
+        "name": "adjust_opportunity_feedback",
+        "description": "Vakansiya yoki imkoniyatlar bo'yicha foydalanuvchi fikrini (feedback) qabul qiladi va ustuvorlikni oshiradi yoki kamaytiradi (masalan: 'SOC vakansiyalarini ko'proq yubor', 'Frontend kerak emas')",
+        "parameters": {"type": "object", "properties": {
+            "topic": {"type": "string", "description": "Yo'nalish yoki mavzu (masalan: 'SOC', 'SIEM', 'Frontend', 'Python', yoki 'last_opportunity')"},
+            "action": {"type": "string", "enum": ["boost", "reduce"], "description": "'boost' (ko'proq yuborish / juda foydali) yoki 'reduce' (kerak emas / kamaytirish)"},
+            "note": {"type": "string", "description": "Foydalanuvchi aytgan asl matn yoki sabab"}
+        }, "required": ["topic", "action"]}}},
+    {"type": "function", "function": {
+        "name": "get_opportunity_feedback_summary",
+        "description": "Foydalanuvchining vakansiyalar bo'yicha bildirgan barcha feedbacklari va hozirgi ustuvorlik holatini ko'rsatadi",
+        "parameters": {"type": "object", "properties": {}}}}
 ]
 
 def call_groq(messages, use_tools=True, temperature=0.7):
@@ -2677,6 +2691,25 @@ async def get_ai_response(chat_id, user_text):
             func_result = edit_skills_profile_action(chat_id)
         elif func_name == "set_skill_level":
             func_result = set_skill_level_action(chat_id=chat_id, **func_args)
+        elif func_name == "adjust_opportunity_feedback":
+            from feedback_manager import record_topic_adjustment, get_last_registered_opportunity
+            topic = func_args.get("topic", "")
+            action = func_args.get("action", "boost")
+            note = func_args.get("note", "")
+            if topic == "last_opportunity" or not topic:
+                last_item = get_last_registered_opportunity()
+                if last_item and last_item.get("topics"):
+                    topic = last_item["topics"][0]
+                else:
+                    topic = "oxirgi_vakansiya"
+            _, msg, _ = record_topic_adjustment(topic, action=action, note=note)
+            send_message(chat_id, msg, parse_mode="HTML")
+            func_result = msg
+        elif func_name == "get_opportunity_feedback_summary":
+            from feedback_manager import get_feedback_summary_text
+            summary_txt = get_feedback_summary_text()
+            send_message(chat_id, summary_txt, parse_mode="HTML")
+            func_result = summary_txt
 
         # ─── YANGI CONFIRM KERAK BO'LGAN FUNKSIYALAR ────────────────
         elif func_name == "request_update_name":
@@ -3144,6 +3177,16 @@ def answer_callback(callback_query_id, text=""):
     except Exception as e:
         print("[ANSWER CALLBACK XATOLIK]:", e)
 
+def edit_message_reply_markup(chat_id, message_id, reply_markup=None):
+    url = f"{TELEGRAM_API}/editMessageReplyMarkup"
+    payload = {"chat_id": chat_id, "message_id": message_id}
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    try:
+        requests.post(url, json=payload, timeout=6)
+    except Exception as e:
+        print("[EDIT REPLY MARKUP XATOLIK]:", e)
+
 def get_updates(offset=None):
     url = f"{TELEGRAM_API}/getUpdates"
     params = {"timeout": 30}
@@ -3280,20 +3323,41 @@ async def handle_callback(callback_query):
         )
         return
 
-    if data == "intel_fb_like":
-        from intelligence.preferences import record_feedback
-        record_feedback("Post", "like", "Foydalanuvchi ma'qulladi")
-        send_message(chat_id, "👍 Rahmat! Kelgusida shu kabi imkoniyatlar ustuvor tarzda yetkaziladi.")
+    if data == "noop":
+        answer_callback(callback_query["id"], "Fikringiz avval saqlangan.")
         return
 
-    if data == "intel_fb_dislike":
-        from intelligence.preferences import record_feedback
-        record_feedback("Post", "dislike", "Foydalanuvchiga yoqmadi")
-        send_message(chat_id, "👎 Tushunarli. Ushbu turdagi e'lonlar bundan keyin kamaytiriladi yoki chetlatiladi.")
+    # ─── OPPORTUNITY FEEDBACK (✅ Kerak, ❌ Kerak emas, ⭐ Juda foydali) ───
+    if data.startswith("fb_") or data.startswith("fb:"):
+        from feedback_manager import record_opportunity_feedback
+        norm_fb = data.replace("fb:", "fb_")
+        parts = norm_fb.split(":")
+        act_part = parts[0].split("_")[1] if len(parts[0].split("_")) > 1 else "k"
+        opp_id = parts[1] if len(parts) > 1 else ""
+
+        ok, reply_text, topics = record_opportunity_feedback(opp_id, action_code=act_part, feedback_source="button")
+        
+        # Tugmani bosilgan holatga almashtirish
+        msg_obj = callback_query.get("message", {})
+        msg_id = msg_obj.get("message_id")
+        if msg_id:
+            if act_part == "s":
+                badge_text = "⭐ Belgilandi: Juda foydali"
+            elif act_part == "x":
+                badge_text = "❌ Belgilandi: Kerak emas"
+            else:
+                badge_text = "✅ Belgilandi: Kerak"
+            edit_message_reply_markup(chat_id, msg_id, {"inline_keyboard": [[{"text": badge_text, "callback_data": "noop"}]]})
+
+        answer_callback(callback_query["id"], "Fikringiz saqlandi!")
+        send_message(chat_id, reply_text, parse_mode="HTML")
         return
 
-    if data == "intel_src_mute":
-        send_message(chat_id, "🚫 Manba vaqtincha kuzatuvdan olindi.")
+    if data in ["intel_fb_like", "intel_fb_dislike", "intel_src_mute"]:
+        act_part = "k" if data == "intel_fb_like" else "x"
+        from feedback_manager import record_opportunity_feedback
+        ok, reply_text, topics = record_opportunity_feedback("", action_code=act_part, feedback_source="button")
+        send_message(chat_id, reply_text, parse_mode="HTML")
         return
 
     if data == "start_quiz":
@@ -3884,6 +3948,18 @@ async def bot_polling_loop():
                             build_tg_settings_keyboard(),
                             parse_mode="HTML"
                         )
+                        continue
+
+                    # ─── OPPORTUNITY FEEDBACK BUYRUQLARI VA MATNLARI ──────
+                    if norm_clean in ["feedback", "/feedback", "fikrlarim", "ustuvorliklar", "/ustuvorlik", "feedback holati"]:
+                        from feedback_manager import get_feedback_summary_text
+                        send_message(chat_id, get_feedback_summary_text(), parse_mode="HTML")
+                        continue
+
+                    from feedback_manager import process_natural_language_feedback
+                    is_fb, fb_reply = process_natural_language_feedback(text)
+                    if is_fb and fb_reply:
+                        send_message(chat_id, fb_reply, parse_mode="HTML")
                         continue
 
 

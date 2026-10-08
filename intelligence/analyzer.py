@@ -106,15 +106,19 @@ Quyidagi Telegram postini tahlil qil va faqat JSON qaytar:
             if result:
                 # Apply feedback score adjustments
                 score = result.get("relevance_score", 0)
-                text_lower = post_text.lower()
-                for b in boosted:
-                    if b in text_lower:
-                        score = min(100, score + 10)
-                for d in disliked:
-                    if d in text_lower:
-                        score = max(0, score - 25)
-
+                from feedback_manager import apply_feedback_adjustments
+                fb_adj = apply_feedback_adjustments(
+                    item_title=result.get("title", ""),
+                    skills=result.get("key_requirements", []),
+                    full_text=post_text,
+                    category=",".join(result.get("categories", [])) or "Imkoniyat",
+                    base_score=score
+                )
+                score = fb_adj["final_score"]
                 result["relevance_score"] = score
+                if fb_adj.get("reasons"):
+                    why = result.setdefault("why_matches", [])
+                    why.extend(fb_adj["reasons"])
                 if score >= 90:
                     result["level"] = "URGENT"
                     result["is_relevant"] = True
