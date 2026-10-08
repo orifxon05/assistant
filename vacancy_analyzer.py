@@ -154,9 +154,7 @@ def extract_with_ai(post_text: str, channel_title: str = "Telegram Kanal") -> di
     models_to_try = [
         primary_model,
         "openai/gpt-oss-20b",
-        "llama-3.3-70b-versatile",
-        "qwen/qwen3.8-27b",
-        "llama-3.1-8b-instant"
+        "qwen/qwen3.8-27b"
     ]
     # Takrorlanmas qilib tartiblash
     seen = set()

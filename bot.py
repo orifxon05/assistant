@@ -2479,9 +2479,7 @@ def call_groq(messages, use_tools=True, temperature=0.7):
     models_to_try = [primary_model]
     for alt in [
         "openai/gpt-oss-20b",
-        "llama-3.3-70b-versatile",
-        "qwen/qwen3.8-27b",
-        "llama-3.1-8b-instant"
+        "qwen/qwen3.8-27b"
     ]:
         if alt not in models_to_try:
             models_to_try.append(alt)
