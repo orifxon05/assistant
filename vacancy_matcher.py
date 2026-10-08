@@ -111,20 +111,26 @@ def check_interest_match(vacancy_data, personal_profile):
             industry_matched.append(ind_name)
             score_points += 2
 
-    pct = int((score_points / max(max_possible, 1)) * 100) if max_possible > 0 else 50
-    pct = min(100, max(20, pct))
+    if not matched_interests:
+        return {
+            "name": "🎯 Qiziqish",
+            "status": "Mos emas",
+            "score": 0,
+            "matched_interests": [],
+            "details": "Vakansiya axborot xavfsizligi yoki dasturlash sohangizga mos kelmaydi."
+        }
 
-    if matched_interests or pct >= 70:
+    pct = int((score_points / max(max_possible, 1)) * 100) if max_possible > 0 else 50
+    pct = min(100, max(40, pct))
+
+    if pct >= 60:
         status = "Mos"
         details = f"Vakansiya profilingizdagi asosiy qiziqishlarga mos keladi: {', '.join(matched_interests[:4])}."
         if industry_matched:
             details += f" Soha ham mos: {', '.join(industry_matched)}."
-    elif pct >= 45:
-        status = "Qisman mos"
-        details = "Vakansiya qisman sohangizga yaqin, lekin asosiy ustuvor yo'nalishlaringiz kamroq aks etgan."
     else:
-        status = "Mos emas"
-        details = "Vakansiya sohangiz va qiziqishlaringizga mos kelmaydi."
+        status = "Qisman mos"
+        details = f"Vakansiya qisman sohangizga yaqin: {', '.join(matched_interests[:3])}."
 
     return {
         "name": "🎯 Qiziqish",
@@ -515,15 +521,15 @@ def check_career_goal_match(vacancy_data, personal_profile):
             return {
                 "name": "🚀 Karyera maqsadi",
                 "status": "Qisman mos",
-                "score": 65,
+                "score": 75,
                 "details": "Python/Dasturlash roli. Kiberxavfsizlikka tutash soha bo'lib, amaliy tajriba beradi."
             }
 
     return {
         "name": "🚀 Karyera maqsadi",
-        "status": "Qisman mos",
-        "score": 50,
-        "details": f"Karyera maqsadingiz ({goal_data.get('goal')}) bilan qisman mos."
+        "status": "Mos emas",
+        "score": 15,
+        "details": f"Vakansiya karyera maqsadingiz ({goal_data.get('goal', 'Kiberxavfsizlik')})ga mos kelmaydi."
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -532,14 +538,11 @@ def check_career_goal_match(vacancy_data, personal_profile):
 
 def match_vacancy_with_profile(vacancy_input):
     """
-    Vakansiyani (matn yoki tayyor vacancy_data lug'atini) foydalanuvchining
-    barcha profillari bilan 7 ta mezon bo'yicha solishtiradi.
+    Vakansiyani foydalanuvchining barcha profillari bilan birlashtirilgan
+    6 ta asosiy mezon bo'yicha qat'iy tekshiradi:
+    "Bu Orifxonga QIZIQARLIMI + VAQTIGA SIG‘ADIMI + JOYI MOSMI + SKILLIGA TO‘G‘RI KELADIMI + TAJRIBASIGA MOSMI + KARYERA MAQSADIGA FOYDALI MI?"
 
-    Parametr:
-      - vacancy_input: dict (vacancy_data) yoki str (Telegram post matni)
-
-    Qaytaradi:
-      match_result dict
+    PRINSIP: "Ko'p ma'lumot emas, kerakli ma'lumot. 100 tadan 5 tasi mos bo'lsa, faqat o'sha 5 tasi o'tadi."
     """
     # 1. Agar matn kelsa, avval tahlil qilish
     if isinstance(vacancy_input, str):
@@ -555,7 +558,7 @@ def match_vacancy_with_profile(vacancy_input):
     p_location = load_location_profile()
     p_skills = load_skills_profile()
 
-    # 3. 7 ta mezon bo'yicha tekshirish
+    # 3. Mezonlar bo'yicha tekshirish
     c_interest = check_interest_match(v_data, p_profile)
     c_schedule = check_schedule_match(v_data, p_schedule)
     c_location = check_location_match(v_data, p_location)
@@ -564,30 +567,7 @@ def match_vacancy_with_profile(vacancy_input):
     c_salary = check_salary_match(v_data, p_profile)
     c_career = check_career_goal_match(v_data, p_profile)
 
-    # 4. Umumiy ball (Vaznli baholash)
-    weights = {
-        "interest": 0.15,
-        "schedule": 0.25,     # Vaqt eng muhim mezon!
-        "location": 0.10,
-        "experience": 0.15,
-        "skills": 0.20,
-        "salary": 0.05,
-        "career_goal": 0.10
-    }
-
-    weighted_score = (
-        c_interest["score"] * weights["interest"] +
-        c_schedule["score"] * weights["schedule"] +
-        c_location["score"] * weights["location"] +
-        c_experience["score"] * weights["experience"] +
-        c_skills["score"] * weights["skills"] +
-        c_salary["score"] * weights["salary"] +
-        c_career["score"] * weights["career_goal"]
-    )
-    overall_score = int(round(weighted_score))
-
-    # 4.5. FEEDBACK ASOSIDA DINAMIK MOSLASH (feedback.json)
-    # Foydalanuvchining avvalgi ✅ Kerak, ❌ Kerak emas, ⭐ Juda foydali fikrlari hisobga olinadi.
+    # 4. Feedback asosida dinamik moslash
     from feedback_manager import apply_feedback_adjustments
     raw_v_text = vacancy_input if isinstance(vacancy_input, str) else json.dumps(v_data, ensure_ascii=False)
     fb_adj = apply_feedback_adjustments(
@@ -595,37 +575,132 @@ def match_vacancy_with_profile(vacancy_input):
         skills=v_data.get("skills_required") or [],
         full_text=raw_v_text,
         category="Vakansiya",
-        base_score=overall_score
+        base_score=75
     )
-    overall_score = fb_adj["final_score"]
     feedback_reasons = fb_adj.get("reasons", [])
     is_fb_suppressed = fb_adj.get("is_suppressed", False)
 
-    # 5. QAT'IY QOIDA: Agar vaqt jiddiy to'qnashsa (masalan 4 soat o'qish bilan),
-    # yoki foydalanuvchi "Kerak emas" deb belgilagan bo'lsa, mos emas deb qaytariladi!
+    # 5. Vaznlar
+    weights = {
+        "interest": 0.20,
+        "schedule": 0.25,     # Vaqt eng muhim mezon!
+        "location": 0.10,
+        "experience": 0.15,
+        "skills": 0.15,
+        "salary": 0.05,
+        "career_goal": 0.10
+    }
+
+    # ─── 6 MEZONNING INDIVIDUAL XULOSALARI ──────────────────────────────
+    # 1. 🎯 QIZIQARLIMI?
+    has_interests = len(c_interest.get("matched_interests", [])) > 0
+    qiziqarlimi = has_interests and c_interest.get("status") in ["Mos", "Qisman mos"]
+    interest_verdict = ("Mos (" + ", ".join(c_interest.get("matched_interests", [])[:2]) + ")") if has_interests else "Mos emas"
+
+    # 2. 🕐 VAQTIGA SIG'ADIMI?
     has_time_conflict = c_schedule.get("has_conflict", False)
     conflict_hours = c_schedule.get("conflict_hours", 0)
-
-    if (has_time_conflict and conflict_hours >= 2) or (is_fb_suppressed and fb_adj.get("penalty", 0) >= 25):
-        overall_status = "🔴 Mos emas"
-        status_note = "Filtrlangan yoki vaqt to'qnashadi"
-    elif overall_score >= 80 and not has_time_conflict:
-        overall_status = "🔥 Juda mos"
-        status_note = "Ajoyib moslik"
-    elif overall_score >= 65 and not has_time_conflict:
-        overall_status = "🟢 Mos"
-        status_note = "Yaxshi moslik"
-    elif overall_score >= 45:
-        overall_status = "🟡 Qisman mos"
-        status_note = "O'rganib chiqish mumkin"
+    vaqt_sigadimi = not has_time_conflict or conflict_hours < 1.5
+    v_hours_str = str(v_data.get("working_hours") or v_data.get("ish_vaqti") or "")
+    if vaqt_sigadimi:
+        if v_hours_str and v_hours_str != "Ko'rsatilmagan" and len(v_hours_str) <= 25:
+            vaqt_verdict = f"Sig'adi ({v_hours_str})"
+        else:
+            vaqt_verdict = "Sig'adi (O'qishdan keyin)"
     else:
+        vaqt_verdict = f"Sig'maydi ({conflict_hours} soat to'qnashuv)"
+
+    # 3. 📍 JOYI MOSMI?
+    joy_mosmi = c_location.get("status") in ["Mos", "Qisman mos"]
+    v_loc_str = str(v_data.get("location") or v_data.get("joy") or "Toshkent")
+    v_fmt_str = str(v_data.get("work_format") or v_data.get("format") or "")
+    if joy_mosmi:
+        if "remote" in v_fmt_str.lower() or "masofaviy" in v_fmt_str.lower():
+            joy_verdict = "Mos (Remote)"
+        elif "hybrid" in v_fmt_str.lower():
+            joy_verdict = f"Mos ({v_loc_str} / Hybrid)"
+        else:
+            joy_verdict = f"Mos ({v_loc_str})"
+    else:
+        joy_verdict = f"Mos emas ({v_loc_str})"
+
+    # 4. 💻 SKILLIGA TO'G'RI KELADIMI?
+    skill_mosmi = c_skills.get("status") in ["Mos", "Qisman mos"]
+    matched_skills_list = c_skills.get("matched_skills", [])
+    if skill_mosmi and matched_skills_list:
+        clean_s = [s.split("[")[0].strip() for s in matched_skills_list[:3]]
+        skill_verdict = f"Mos ({', '.join(clean_s)})"
+    elif skill_mosmi:
+        skill_verdict = "Mos (Junior daraja)"
+    else:
+        skill_verdict = "To'g'ri kelmaydi"
+
+    # 5. 🎓 TAJRIBASIGA MOSMI?
+    tajriba_mosmi = c_experience.get("status") in ["Mos", "Qisman mos"]
+    v_exp_str = str(v_data.get("experience_required") or v_data.get("tajriba_talabi") or "Junior/Intern")
+    if tajriba_mosmi:
+        tajriba_verdict = f"Mos ({v_exp_str})"
+    else:
+        tajriba_verdict = f"Mos emas ({v_exp_str})"
+
+    # 6. 🚀 KARYERA MAQSADIGA FOYDALI MI?
+    karyera_foydalimi = c_career.get("status") in ["Mos", "Qisman mos"] and not is_fb_suppressed
+    if is_fb_suppressed:
+        karyera_verdict = "Rad etilgan (Fikrlar bo'yicha filtrlangan)"
+    elif karyera_foydalimi:
+        karyera_verdict = "Foydali (SOC Analyst sari qadam)"
+    else:
+        karyera_verdict = "Foydasiz (Boshqa soha)"
+
+    six_pillars = {
+        "interest": {"name": "🎯 Qiziqish", "passed": qiziqarlimi, "verdict": interest_verdict, "status": c_interest.get("status")},
+        "schedule": {"name": "🕐 Vaqt", "passed": vaqt_sigadimi, "verdict": vaqt_verdict, "status": c_schedule.get("status")},
+        "location": {"name": "📍 Joy", "passed": joy_mosmi, "verdict": joy_verdict, "status": c_location.get("status")},
+        "skills": {"name": "💻 Skill", "passed": skill_mosmi, "verdict": skill_verdict, "status": c_skills.get("status")},
+        "experience": {"name": "🎓 Tajriba", "passed": tajriba_mosmi, "verdict": tajriba_verdict, "status": c_experience.get("status")},
+        "career": {"name": "🚀 Karyera", "passed": karyera_foydalimi, "verdict": karyera_verdict, "status": c_career.get("status")}
+    }
+
+    failed_pillars = [p["name"] for p in six_pillars.values() if not p["passed"]]
+
+    # ─── QAT'IY FILTRLASH: "Ko'p ma'lumot emas, kerakli ma'lumot" ───
+    # 100 ta postdan faqat haqiqatan barcha 6 mezonni qanoatlantirganlari o'tadi!
+    if failed_pillars:
+        is_qualified = False
+        overall_score = min(35, c_interest["score"], c_schedule["score"])
         overall_status = "🔴 Mos emas"
-        status_note = "Mos kelmaydi"
+        status_note = f"6 mezon talabiga javob bermaydi ({', '.join(failed_pillars)})"
+    else:
+        is_qualified = True
+        weighted_score = (
+            c_interest["score"] * weights["interest"] +
+            c_schedule["score"] * weights["schedule"] +
+            c_location["score"] * weights["location"] +
+            c_experience["score"] * weights["experience"] +
+            c_skills["score"] * weights["skills"] +
+            c_salary["score"] * weights["salary"] +
+            c_career["score"] * weights["career_goal"]
+        )
+        overall_score = int(round(weighted_score)) + fb_adj.get("bonus", 0)
+        overall_score = max(0, min(100, overall_score))
+
+        if overall_score >= 90:
+            overall_status = "🔥 Juda mos"
+            status_note = "Barcha 6 mezon bo'yicha ideal moslik"
+        elif overall_score >= 75:
+            overall_status = "🟢 Mos"
+            status_note = "Barcha 6 mezon bo'yicha yaxshi moslik"
+        else:
+            overall_status = "🟡 Qisman mos"
+            status_note = "Umumiy ball 75 ga yetmadi"
 
     match_result = {
         "overall_status": overall_status,
         "overall_score": overall_score,
+        "is_qualified": is_qualified,
         "status_note": status_note,
+        "six_pillars": six_pillars,
+        "failed_pillars": failed_pillars,
         "has_time_conflict": has_time_conflict,
         "conflict_hours": conflict_hours,
         "feedback_reasons": feedback_reasons,

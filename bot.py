@@ -1960,12 +1960,10 @@ async def analyze_channels_recent_posts_action(hours=24):
                     has_conflict = match_result.get("has_time_conflict", False)
                     conflict_hrs = match_result.get("conflict_hours", 0)
 
-                    # Agar vaqt jiddiy to'qnashsa (>= 1.5 soat), scoreni tushiramiz
-                    if has_conflict and conflict_hrs >= 1.5:
-                        score = min(score, 40)
+                    is_qualified = match_result.get("is_qualified", False)
 
-                    # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
-                    if score >= 75:
+                    # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ va 6 ta mezonni bajargan bo'lsa
+                    if score >= 75 and is_qualified:
                         from intelligence.digest import record_daily_item, generate_vacancy_digest_reason
                         why_reason = generate_vacancy_digest_reason(match_result)
                         record_daily_item(
@@ -2465,7 +2463,13 @@ tools = [
     {"type": "function", "function": {
         "name": "get_opportunity_feedback_summary",
         "description": "Foydalanuvchining vakansiyalar bo'yicha bildirgan barcha feedbacklari va hozirgi ustuvorlik holatini ko'rsatadi",
-        "parameters": {"type": "object", "properties": {}}}}
+        "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {
+        "name": "evaluate_vacancy_match",
+        "description": "Vakansiya yoki ish e'loni matnini foydalanuvchining 6 ta mezoni (Qiziqish, Vaqt, Joy, Skill, Tajriba, Karyera) bo'yicha birlashtirib, chuqur tahlil qiladi va moslik hisobotini beradi",
+        "parameters": {"type": "object", "properties": {
+            "vacancy_text": {"type": "string", "description": "Tekshirilishi kerak bo'lgan vakansiya matni yoki tavsifi"}
+        }, "required": ["vacancy_text"]}}}
 ]
 
 def call_groq(messages, use_tools=True, temperature=0.7):
@@ -2735,6 +2739,18 @@ async def get_ai_response(chat_id, user_text):
             summary_txt = get_feedback_summary_text()
             send_message(chat_id, summary_txt, parse_mode="HTML")
             func_result = summary_txt
+        elif func_name == "evaluate_vacancy_match":
+            vac_text = func_args.get("vacancy_text", "")
+            from vacancy_matcher import match_vacancy_with_profile, format_match_report
+            from intelligence.formatter import format_matched_vacancy_notification
+            match_res = match_vacancy_with_profile(vac_text)
+            if match_res.get("is_qualified") and match_res.get("overall_score", 0) >= 75:
+                formatted_txt, kb = format_matched_vacancy_notification(match_res, source_title="Foydalanuvchi so'rovi")
+                send_message(chat_id, formatted_txt, kb, parse_mode="HTML")
+            else:
+                rep = format_match_report(match_res)
+                send_message(chat_id, rep, parse_mode="HTML")
+            func_result = f"Vakansiya mosligi 6 mezon bo'yicha tahlil qilindi. Ball: {match_res.get('overall_score')}%, Natija: {match_res.get('overall_status')}."
 
         # ─── YANGI CONFIRM KERAK BO'LGAN FUNKSIYALAR ────────────────
         elif func_name == "request_update_name":
@@ -3942,6 +3958,23 @@ async def bot_polling_loop():
                             res = await analyze_channels_recent_posts_action(hours=24)
                             send_message(ADMIN_ID, res)
                         asyncio.create_task(_do_analysis_cmd())
+                        continue
+
+                    if text.startswith("/vakansiya") or text.startswith("/tekshir"):
+                        vac_body = text.split(" ", 1)[1] if " " in text else ""
+                        if not vac_body.strip():
+                            send_message(chat_id, "ℹ️ Vakansiyani 6 mezon bo'yicha tahlil qilish uchun matnni kiriting:\nMasalan: <code>/tekshir [vakansiya matni]</code>", parse_mode="HTML")
+                        else:
+                            from vacancy_matcher import match_vacancy_with_profile, format_match_report
+                            from intelligence.formatter import format_matched_vacancy_notification
+                            send_message(chat_id, "⏳ Vakansiya 6 ta asosiy mezon bo'yicha tahlil qilinmoqda...")
+                            match_res = match_vacancy_with_profile(vac_body)
+                            if match_res.get("is_qualified") and match_res.get("overall_score", 0) >= 75:
+                                formatted_txt, kb = format_matched_vacancy_notification(match_res, source_title="Shaxsiy tahlil")
+                                send_message(chat_id, formatted_txt, kb, parse_mode="HTML")
+                            else:
+                                rep = format_match_report(match_res)
+                                send_message(chat_id, rep, parse_mode="HTML")
                         continue
 
                     if norm_clean in ["/digest", "digest", "hisobot", "/hisobot", "bugungi hisobot", "kunlik hisobot", "kunlik hisobotim", "kunlik xulosa", "/kunlik_xulosa"]:

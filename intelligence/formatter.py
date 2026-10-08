@@ -71,7 +71,12 @@ def format_matched_vacancy_notification(match_result, source_title="Kanal", post
         clean_skills = [s.split("[")[0].strip() for s in matched_skills[:3]]
         reasons.append(f"• Ko'nikmalar: {', '.join(clean_skills)}")
 
-    # 6. Foydalanuvchi feedbackidan kelib chiqqan ustuvorlik
+    # 6. Karyera maqsadi
+    c_career = c.get("career_goal", {})
+    if c_career.get("status") in ["Mos", "Qisman mos"]:
+        reasons.append("• Karyera maqsadi: SOC Analyst sari qadam")
+
+    # 7. Foydalanuvchi feedbackidan kelib chiqqan ustuvorlik
     fb_reasons = match_result.get("feedback_reasons", [])
     for fr in fb_reasons:
         reasons.append(f"• {fr}")

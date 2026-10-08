@@ -84,8 +84,10 @@ async def run_intelligence_check(telethon_client, send_bot_message_func=None, ad
                     if has_conflict and conflict_hrs >= 1.5:
                         score = min(score, 40)
 
-                    # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
-                    if score >= 75:
+                    is_qualified = match_result.get("is_qualified", False)
+
+                    # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ va 6 ta asosiy mezon bajarilgan bo'lsa
+                    if score >= 75 and is_qualified:
                         from .digest import generate_vacancy_digest_reason
                         why_reason = generate_vacancy_digest_reason(match_result)
                         record_daily_item(
@@ -110,8 +112,8 @@ async def run_intelligence_check(telethon_client, send_bot_message_func=None, ad
                             except Exception as e:
                                 print(f"[MONITOR] Xabar yuborishda xatolik: {e}")
                     else:
-                        # Past score postlar (< 75) yuborilmaydi
-                        print(f"[MONITOR] Vakansiya o'tkazib yuborildi (Score: {score} < 75) - {title}")
+                        # Past score postlar (< 75) yoki 6 mezondan o'tmaganlar yuborilmaydi
+                        print(f"[MONITOR] Vakansiya o'tkazib yuborildi (Score: {score}, Qualified: {is_qualified}, Sabab: {match_result.get('status_note')}) - {title}")
                 else:
                     # Boshqa e'lonlar (Kurs, Grant, Hackathon va h.k.)
                     channel_intent = src_pref.get("intent", "all")
