@@ -3975,10 +3975,26 @@ async def bot_polling_loop():
                         start_interest_test_action(ADMIN_ID)
                         continue
 
-                    if normalized in ["/tahlil", "tahlil", "/analiz", "analiz"]:
-                        send_message(chat_id, "🔍 Kuzatuvdagi barcha kanallar tahlil qilinmoqda (oxirgi 24 soatlik postlar)... Iltimos, biroz kuting.")
-                        async def _do_analysis_cmd():
-                            res = await analyze_channels_recent_posts_action(hours=24)
+                    if (
+                        normalized in ["/tahlil", "tahlil", "/analiz", "analiz"]
+                        or text.startswith("/tahlil")
+                        or text.startswith("/analiz")
+                        or norm_clean in [
+                            "kanallarni tahlil qil", "kanallarni tahlil qilish",
+                            "kanallarni tekshir", "kanallarni tekshirish",
+                            "postlarni tahlil qil", "postlarni tahlil qilish",
+                            "postlarni tekshir", "postlarni tekshirish",
+                            "vakansiyalarni tahlil qil", "vakansiyalarni tekshir",
+                            "yangi postlarni tahlil qil", "yangi postlarni tekshir"
+                        ]
+                    ):
+                        parts = text.split()
+                        hours = 24
+                        if len(parts) > 1 and parts[1].isdigit():
+                            hours = int(parts[1])
+                        send_message(chat_id, f"🔍 Kuzatuvdagi barcha kanallar tahlil qilinmoqda (oxirgi {hours} soatlik postlar)... Iltimos, biroz kuting.")
+                        async def _do_analysis_cmd(h=hours):
+                            res = await analyze_channels_recent_posts_action(hours=h)
                             send_message(ADMIN_ID, res)
                         asyncio.create_task(_do_analysis_cmd())
                         continue

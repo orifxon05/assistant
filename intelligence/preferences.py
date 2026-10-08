@@ -5,7 +5,7 @@ PREFERENCES_FILE = "intelligence_preferences.json"
 
 DEFAULT_PREFERENCES = {
     "check_interval_minutes": 30,
-    "is_enabled": True,
+    "is_enabled": False,  # Avtomatik fon tahlili o'chirilgan: tahlil faqat botda buyruq berilganda ishga tushadi
     "dry_run": False,
     "daily_digest_enabled": True,
     "daily_digest_time": "21:00",
