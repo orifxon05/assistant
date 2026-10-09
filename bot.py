@@ -3042,7 +3042,7 @@ async def get_ai_response(chat_id, user_text):
     return final_reply, None
 
 CONVERSATION_TIMEOUT = 10 * 60
-DAILY_AUTOREPLY_LIMIT = 30
+DAILY_AUTOREPLY_LIMIT = 30  # Har bir alohida chat uchun kunlik 30 ta limit (barcha chatlar uchun umumiy emas, har biriga alohida 30 tadan)
 MAX_AUTOREPLY_PER_SESSION = DAILY_AUTOREPLY_LIMIT
 MIN_REPLY_INTERVAL = 3.0
 
@@ -3099,11 +3099,18 @@ async def get_autoreply(chat_key, sender_name, user_text):
         return None
 
     state = load_autoreply_state()
-    chat_data = state.get(chat_key, {
-        "introduced": False, "history": [],
-        "last_message_time": now_ts, "last_reply_time": 0, "conversation_active": True,
-        "sender_name": sender_name, "count": 0, "date": today_str
-    })
+    if chat_key not in state:
+        state[chat_key] = {
+            "introduced": False,
+            "history": [],
+            "last_message_time": now_ts,
+            "last_reply_time": 0,
+            "conversation_active": True,
+            "sender_name": sender_name,
+            "count": 0,
+            "date": today_str
+        }
+    chat_data = state[chat_key]
     chat_data.setdefault("history", [])
     chat_data.setdefault("conversation_active", True)
     chat_data.setdefault("sender_name", sender_name)
@@ -3111,7 +3118,7 @@ async def get_autoreply(chat_key, sender_name, user_text):
     chat_data.setdefault("last_reply_time", 0)
     chat_data.setdefault("date", today_str)
 
-    # Kun almashganda (yangi sana kelganda) hisoblagich avtomatik nolga tushadi
+    # Kun almashganda (yangi sana kelganda) ushbu chat hisoblagichi avtomatik nolga tushadi
     saved_date = chat_data.get("date") or chat_data.get("last_date")
     if saved_date != today_str:
         chat_data["count"] = 0
@@ -3138,9 +3145,10 @@ async def get_autoreply(chat_key, sender_name, user_text):
         save_autoreply_state(state)
         return None
 
-    # 5. Har bir kontakt uchun kunlik javob berish cheklovi (kuniga maksimal 30 ta javob)
+    # 5. Har bir alohida chat uchun kunlik javob berish cheklovi (bitta chat uchun kuniga maksimal 30 ta)
+    # Bu limit har bir chatga individual hisoblanadi va boshqa chatlarga umuman ta'sir qilmaydi!
     if chat_data["count"] >= DAILY_AUTOREPLY_LIMIT:
-        print(f"[AUTOREPLY] {sender_name} uchun suhbat limiti tugadi ({chat_data['count']} ta javob berilgan).")
+        print(f"[AUTOREPLY] {sender_name} uchun ushbu chat bo'yicha kunlik limit ({DAILY_AUTOREPLY_LIMIT} ta) tugadi. Boshqa chatlarga javob berish davom etadi.")
         return None
 
     is_first_message = not chat_data.get("introduced", False)
