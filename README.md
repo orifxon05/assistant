@@ -1,27 +1,23 @@
-# 🤖 Jarvis AI Assistant & Telegram Intelligence Monitor
+# 🤖 Jarvis AI Assistant & Telegram Userbot
 
-**Jarvis** — bu shaxsiy Telegram assistenti va aqlli kanallar monitoringi tizimi. U Termux (Android) va Linux muhitida to'liq avtonom ishlaydi.
+**Jarvis** — bu shaxsiy aqlli Telegram assistenti va userbot tizimi. U Termux (Android) va Linux muhitida to'liq avtonom ishlaydi.
 
 ---
 
 ## 🌟 Asosiy Imkoniyatlar
 
-1. **📂 Telegram Intelligence Monitoring:**
-   - Telegramdagi `📂 Intelligence` papkasiga qo'shilgan barcha kanallarni avtomatik kuzatadi.
-   - Har bir yangi postni AI (Groq) orqali chuqur tahlil qiladi (spam, kazino va keraksiz reklamalarni avtomatik filtrlaydi).
-   - Sizning yo'nalishingiz (Cybersecurity, Python Backend, AI, Frontend, Mobile...) bo'yicha eng mos **Vakansiyalar**, **Internship/Amaliyotlar**, **Bepul kurslar** va **Grantlar**ni saralab Telegramga yetkazadi.
-   - Har bir e'lon uchun **🧠 Jarvis amaliy xulosasi va maslahati**ni yozib beradi (masalan: *"Talablar mos, talaba bo'lsangiz ham aloqaga chiqib grafikni kelishib ko'ring"*).
+1. **💬 Tirik va Aqlli Avtojavob (Userbot):**
+   - Oflayn vaqtingizda shaxsiy hisobingizga kelgan xabarlarga xuddi tirik insondek tabiiy, muloyim va aqlli javob qaytaradi.
+   - Har bir suhbatdosh uchun kunlik limit va kontakt filtrlari (faqat tanlanganlarga yoki tanlanganlardan tashqari hammaga).
+   - Suhbat yakunlangach, egasiga 3 soniyada tushunarli **ixcham hisobot** tayyorlab yuboradi.
 
-2. **🎯 Shaxsiy Qiziqishlar Testi (Anketa):**
-   - Birinchi ishga tushganda yoki istalgan payt `/quiz` buyrug'i orqali qiziqishlaringizni aniqlaydi.
-   - Soha, maqsad (Ish, Kurs, Grant, Amaliyot), tajriba va joylashuvni alohida inobatga oladi.
+2. **⚙️ To'liq Telegram Boshqaruvi:**
+   - Profil, bio, ism-familiya, username, fotosuratlar.
+   - Maxfiylik va xavfsizlik (2FA holati, seanslar, bloklanganlar).
+   - Chat papkalari (folderlar), kanallar, guruhlar, bildirishnomalar va akkaunt TTL boshqaruvi.
 
-3. **💬 Tirik va Aqlli Avtojavob (Userbot):**
-   - Oflayn vaqtingizda shaxsiy hisobingizga kelgan xabarlarga xuddi tirik yordamchidek muloyim va zehnli javob qaytaradi.
-   - Suhbat tugagach, egasiga 3 soniyada tushunarli **ixcham hisobot** yuboradi.
-
-4. **⚡ To'liq Telegram Boshqaruvi:**
-   - Profil, bio, ism-familiya, username, fotosuratlar, 2FA holati, maxfiylik, papkalar, seanslar va guruhlarni bot menyusi orqali boshqarish.
+3. **🔄 Avtomatik Yangilanish (OTA):**
+   - Kodlardagi yangilanishlarni GitHub orqali bot menyusidan bir tugma orqali yoki Termux terminalidan tortib olish.
 
 ---
 
@@ -37,7 +33,7 @@ cd jarvis
 ```bash
 bash setup.sh
 ```
-*Skript barcha paketlarni o'rnatadi, sizdan Bot Token, Groq API, API ID/Hash va Ismingizni so'rab `.env` faylini avtomatik yaratadi.*
+*Skript barcha kerakli paketlarni o'rnatadi, sizdan Bot Token, Groq API, API ID/Hash va Ismingizni so'rab `.env` faylini avtomatik yaratadi.*
 
 ### 3. Botni ishga tushirish:
 ```bash
@@ -60,9 +56,8 @@ bash update.sh
 
 ## 📌 Foydali Buyruqlar
 
-* `jarvis` — Botni fonda ishga tushirish
+* `jarvis` — Botni ishga tushirish
 * `jarvis update` — GitHub'dan yangilanishlarni olish
-* `jarvis test` — Dry-run xavfsiz tahlil testini o'tkazish
 * `/menu` — Telegramda boshqaruv menyusini ochish
-* `/tahlil` — Kuzatuvdagi barcha kanallarni oxirgi 24 soatlik postlarini darhol tahlil qilish
-* `/quiz` — Qiziqishlar anketasini qayta topshirish
+* `/version` — Versiya va tizim holatini tekshirish
+* `/update` — Tizimni yangilash

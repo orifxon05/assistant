@@ -11,9 +11,8 @@ cd "$CURRENT_DIR"
 # 0. Muhim shaxsiy ma'lumotlarni zaxiralash (har qanday holatda yo'qolmasligi uchun):
 mkdir -p .update_backup
 [ -f ".env" ] && cp ".env" .update_backup/
-[ -f "profile.json" ] && cp "profile.json" .update_backup/
 cp *.session* .update_backup/ 2>/dev/null
-cp contacts.json history.json todos.json autoreply_state.json status.json action_history.json intelligence_*.json personal_profile.json schedule.json location_profile.json skills_profile.json .update_backup/ 2>/dev/null
+cp contacts.json history.json todos.json autoreply_state.json status.json action_history.json .update_backup/ 2>/dev/null
 
 REPO_URL="https://github.com/orifxon05/assistant.git"
 UPDATED=0
@@ -40,15 +39,12 @@ if [ "$UPDATED" -eq 0 ]; then
     echo "📡 Repositoriyadan to'g'ridan-to'g'ri yangilanishlar yuklanmoqda: $REPO_URL ..."
     TMP_DIR=$(mktemp -d)
     if git clone --depth 1 "$REPO_URL" "$TMP_DIR" 2>/dev/null; then
-        cp -r "$TMP_DIR/intelligence" . 2>/dev/null
         cp "$TMP_DIR/bot.py" . 2>/dev/null
         cp "$TMP_DIR/requirements.txt" . 2>/dev/null
         cp "$TMP_DIR/setup.sh" . 2>/dev/null
         cp "$TMP_DIR/update.sh" . 2>/dev/null
-        cp "$TMP_DIR/test_intelligence.py" . 2>/dev/null
         cp "$TMP_DIR/README.md" . 2>/dev/null
         cp "$TMP_DIR/.gitignore" . 2>/dev/null
-        [ ! -f "profile.json" ] && cp "$TMP_DIR/profile.json" . 2>/dev/null
         rm -rf "$TMP_DIR"
         echo "✅ GitHub'dan fayllar yangilandi!"
         UPDATED=1
@@ -81,7 +77,6 @@ fi
 # 3. Zaxiradan shaxsiy ma'lumotlarni qayta tiklash:
 if [ -d ".update_backup" ]; then
     [ -f ".update_backup/.env" ] && cp ".update_backup/.env" .
-    [ -f ".update_backup/profile.json" ] && cp ".update_backup/profile.json" .
     cp .update_backup/*.session* . 2>/dev/null
     cp .update_backup/contacts.json . 2>/dev/null
     cp .update_backup/history.json . 2>/dev/null
@@ -89,17 +84,12 @@ if [ -d ".update_backup" ]; then
     cp .update_backup/autoreply_state.json . 2>/dev/null
     cp .update_backup/status.json . 2>/dev/null
     cp .update_backup/action_history.json . 2>/dev/null
-    cp .update_backup/intelligence_*.json . 2>/dev/null
-    cp .update_backup/personal_profile.json . 2>/dev/null
-    cp .update_backup/schedule.json . 2>/dev/null
-    cp .update_backup/location_profile.json . 2>/dev/null
-    cp .update_backup/skills_profile.json . 2>/dev/null
     rm -rf .update_backup
 fi
 
 # 4. Kesh fayllarni tozalash:
-rm -f *.pyc intelligence/*.pyc 2>/dev/null
-rm -rf __pycache__ intelligence/__pycache__ 2>/dev/null
+rm -f *.pyc 2>/dev/null
+rm -rf __pycache__ 2>/dev/null
 
 # 5. Kutubxonalarni tekshirish va yangilash:
 echo ""

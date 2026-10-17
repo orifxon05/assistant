@@ -9,18 +9,6 @@ echo "1/4: Tizim paketlarini yangilash..."
 pkg update -y && pkg upgrade -y
 pkg install python git nano -y
 
-# Agar zip ochilganda intelligence-*.py bo'lib tushgan bo'lsa, avtomatik papkaga solish:
-if ls intelligence-*.py 1> /dev/null 2>&1; then
-    echo "Papkalar avtomatik tartibga keltirilmoqda..."
-    mkdir -p intelligence
-    for f in intelligence-*.py; do
-        fname=$(echo "$f" | sed 's/^intelligence-//')
-        mv "$f" "intelligence/$fname" 2>/dev/null
-    done
-    [ -f "intelligence/init.py" ] && mv "intelligence/init.py" "intelligence/__init__.py"
-    rm -f intelligence-*.pyc 2>/dev/null
-    rm -rf intelligence-pycache-* 2>/dev/null
-fi
 
 echo ""
 echo "2/4: Python kutubxonalarini o'rnatish..."
@@ -87,8 +75,6 @@ cd "$CURRENT_DIR"
 
 if [ "$1" = "update" ]; then
     bash update.sh
-elif [ "$1" = "test" ]; then
-    python test_intelligence.py
 else
     python bot.py
 fi
@@ -106,7 +92,6 @@ echo ""
 echo "Foydali buyruqlar:"
 echo "👉 jarvis         - Botni ishga tushirish"
 echo "👉 jarvis update  - Internet orqali kodni yangilash"
-echo "👉 jarvis test    - Dry-run tahlil testini o'tkazish"
 echo "👉 jarvis"
 echo "deb yozsangiz bot avtomatik ishga tushadi!"
 echo ""

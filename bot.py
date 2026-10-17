@@ -102,34 +102,8 @@ QAT'IY QOIDALAR:
    - Auto-delete sozlamasi (xabar o'z-o'zidan o'chishi) -> 'get_auto_delete_setting', o'rnatish -> 'request_set_auto_delete'
    - Maxfiy kontent (sensitive content) -> 'get_content_settings', o'zgartirish -> 'request_set_content_settings'
    - Akkaunt tilini o'zgartirish -> 'request_change_language'
-   - Intelligence / Addek jildi monitoring holati -> 'get_intelligence_status'
-   - Intelligence yangi postlarni hozir tekshirish -> 'check_intelligence_now'
-   - Bugungi foydali postlar / Kunlik xulosa (digest) -> 'get_today_digest_summary'
-   - Intelligence filtri va sozlamalari -> 'get_intelligence_preferences'
-   - Intelligence monitoringni yoqish/o'chirish -> 'toggle_intelligence'
-   - Tekshiruv oralig'ini (interval) o'zgartirish -> 'set_intelligence_interval'
-   - Shaxsiy profil anketasini qayta to'ldirish -> 'start_profile_quiz'
-   - Kanallardagi postlarni tahlil qilish (masalan: 24 soatlik postlar, manfaatli postlarni topish, vakansiyalarni ko'rib chiqish) -> 'analyze_channels_recent_posts'
-   - Shaxsiy qiziqishlar testini boshlash (9 bosqichli professional va shaxsiy qiziqishlar testi) -> 'start_interest_test'
-   - Shaxsiy profilni to'liq ko'rish/ko'rsatish -> 'show_personal_profile'
-   - Shaxsiy profilni tahrirlash/o'zgartirish menyusi -> 'edit_personal_profile'
-   - Shaxsiy profilga yangi qiziqish yoki texnologiya qo'shish -> 'add_personal_interest'
-   - Shaxsiy profildan qiziqishni olib tashlash/o'chirish -> 'remove_personal_interest'
-   - Shaxsiy vaqt jadvalini ko'rish/ko'rsatish (uydan chiqish, o'qish/ish, yo'l, qaytish, bo'sh vaqt) -> 'show_personal_schedule'
-   - Bugun qachon bo'sh ekanligini va hozirgi bandlik holatini tekshirish -> 'get_today_free_time'
-   - Shaxsiy vaqt jadvalini o'zgartirish/sozlash -> 'edit_personal_schedule'
-   - Vakansiya ish vaqtini foydalanuvchi jadvali bilan solishtirish -> 'check_job_schedule'
-   - Shaxsiy joylashuv va transport profilini ko'rish (shahar, tuman, remote/hybrid/ofis, yo'l vaqti, transport) -> 'show_location_profile'
-   - Joylashuv va transport profilini o'zgartirish -> 'edit_location_profile'
-   - Vakansiya manzili va ish formatini foydalanuvchi joylashuviga mosligini tekshirish -> 'check_job_location'
-   - Shaxsiy ko'nikmalar (Skills Profile)ni ko'rish (universitet, kurslar, sertifikatlar, python, linux, siem, networking, tillar, darajalar) -> 'show_skills_profile'
-   - Ko'nikmalar profilini o'zgartirish/sozlash -> 'edit_skills_profile'
-   - Aniq bir skill darajasini (Beginner, Intermediate, Advanced) belgilash -> 'set_skill_level'
-   - Vakansiya va imkoniyatlar bo'yicha feedback (ko'proq yubor, kerak emas) -> 'adjust_opportunity_feedback'
-   - Feedbacklar va ustuvorliklar holatini ko'rish -> 'get_opportunity_feedback_summary'
  7. HECH QACHON RAD ETMA:
    - {name} Telegram ichidagi biror ish qilishni buyursa, HECH QACHON "Men buni qila olmayman", "Bu funksiya mavjud emas", "Bu imkonsiz" kabi rad javoblarni berma!
-   - Agar {name} "kanallarni tahlil qil", "24 soat ichida yozilgan postlardan manfaatlisini tashla" kabi topshiriq bersa -> DARHOL 'analyze_channels_recent_posts' funksiyasini chaqir!
    - Avval mavjud funksiyalar orasidan tegishlisini qidir va chaqir.
    - Agar mavjud funksiya topilmasa ham, natijani izoh bilan tushuntir — lekin har doim harakat qilib ko'r.
    - Faqat haqiqatan ham server-tomondan (API orqali) imkonsiz bo'lsa (masalan client-side sozlama — fon rasmi, tungi rejim, animatsiyalar, quvvat tejash), nima uchun imkonsiz ekanligini QISQA va TUSHUNARLI tushuntir: "Bu sozlama faqat Telegram ilovasining o'zida o'zgartiriladi, API orqali emas" deb ayt va muqobil imkoniyat taklif qil.
@@ -360,22 +334,6 @@ def build_menu_keyboard():
                 {"text": ("\u2705 " if enabled else "") + "\U0001f534 Men oflaynman", "callback_data": "set_offline"}
             ],
             [{"text": f"\U0001f3af Filtr: {mode_label}", "callback_data": "open_filter"}],
-            [
-                {"text": "📊 Kanallarni tahlil qilish (24s)", "callback_data": "run_full_analysis"},
-                {"text": "🎯 Qiziqishlar testi", "callback_data": "pt_start_test"}
-            ],
-            [
-                {"text": "🗓 Vaqt jadvalim", "callback_data": "sc_view"},
-                {"text": "⏳ Qachon bo'shman?", "callback_data": "sc_free_today"}
-            ],
-            [
-                {"text": "📋 Shaxsiy profilim", "callback_data": "pt_view_profile"},
-                {"text": "🛠 Skills Profile", "callback_data": "sk_view"}
-            ],
-            [
-                {"text": "📍 Manzil & Transport", "callback_data": "loc_view"},
-                {"text": "📂 Intelligence holati", "callback_data": "quick_intel"}
-            ],
             [
                 {"text": "⚙️ Telegram sozlamalari", "callback_data": "open_tg_settings"}
             ],
@@ -1683,337 +1641,6 @@ async def request_send_message(chat_id, contact_name, message_text):
     text = f"\"{contact_name}\" ga mos bir nechta kontakt topildi. Qaysi birini tanlaysiz?"
     return text, keyboard
 
-# ─── INTELLIGENCE MODULI FUNKSIYALARI ────────────────────────────────
-
-async def get_intelligence_status_action():
-    from intelligence.sources import get_intelligence_folder_peers
-    from intelligence.preferences import load_preferences
-    from intelligence.config import load_user_profile
-
-    peers, folder_title = await get_intelligence_folder_peers(telethon_client)
-    prefs = load_preferences()
-    prof = load_user_profile()
-
-    status_icon = "🟢 Faol" if prefs.get("is_enabled", True) else "🔴 To'xtatilgan"
-    interval = prefs.get("check_interval_minutes", 30)
-    lines = []
-    lines.append(f"📊 <b>Intelligence Monitoring Holati:</b> {status_icon}")
-    lines.append(f"📁 <b>Jild:</b> {folder_title or '📂 Intelligence (topilmadi)'}")
-    lines.append(f"⏱ <b>Tekshiruv oralig'i:</b> Har {interval} daqiqada")
-    lines.append(f"👤 <b>Foydalanuvchi:</b> {prof.get('name')} ({prof.get('primary_field')})")
-    lines.append(f"📡 <b>Kuzatilayotgan kanallar:</b> {len(peers)} ta")
-    if peers:
-        for p in peers[:10]:
-            title = getattr(p, 'title', None) or getattr(p, 'first_name', 'Kanal')
-            uname = getattr(p, 'username', None)
-            u_str = f" (@{uname})" if uname else ""
-            lines.append(f"  • {title}{u_str}")
-        if len(peers) > 10:
-            lines.append(f"  ... va yana {len(peers)-10} ta")
-    else:
-        lines.append("<i>Hozircha papkaga kanallar qo'shilmagan. Telegramda '📂 Intelligence' papkasiga kanallarni qo'shing.</i>")
-
-    return "\n".join(lines)
-
-async def check_intelligence_now_action():
-    from intelligence.monitor import run_intelligence_check
-    send_message(ADMIN_ID, "⏳ '📂 Intelligence' papkasidagi kanallar tekshirilmoqda, biroz kuting...")
-    count, found = await run_intelligence_check(telethon_client, send_bot_message_func=send_message, admin_id=ADMIN_ID, dry_run=False)
-    if not found:
-        return f"✅ Tekshiruv yakunlandi. Jami {count} ta yangi post o'rganildi, ammo hozircha yangi yuqori moslikdagi e'lon topilmadi."
-    return f"✅ Tekshiruv yakunlandi! {count} ta postdan {len(found)} ta eng mos imkoniyatlar yuqorida yuborildi."
-
-def get_today_digest_summary_action():
-    from intelligence.digest import get_today_digest
-    return get_today_digest()
-
-def get_intelligence_preferences_action():
-    from intelligence.preferences import load_preferences
-    from intelligence.config import load_user_profile
-    prefs = load_preferences()
-    prof = load_user_profile()
-    is_mon_active = "Yoqilgan" if prefs.get('is_enabled') else "O'chirilgan"
-    is_digest_active = "Yoqilgan" if prefs.get('daily_digest_enabled') else "O'chirilgan"
-    lines = []
-    lines.append("⚙️ <b>Intelligence Sozlamalari:</b>")
-    lines.append(f"• Monitoring: {is_mon_active}")
-    lines.append(f"• Interval: {prefs.get('check_interval_minutes')} daqiqa")
-    lines.append(f"• Kunlik xulosa: {is_digest_active} ({prefs.get('daily_digest_time')})")
-    lines.append(f"• Qidirilayotgan soha: {prof.get('primary_field')}")
-    lines.append(f"• Ruxsat etilgan tajriba: {', '.join(prof.get('allowed_experience', []))}")
-    disliked = prefs.get('disliked_keywords', [])
-    if disliked:
-        lines.append(f"• Chetlangan mavzular: {', '.join(disliked)}")
-    return "\n".join(lines)
-
-def toggle_intelligence_action(enable: bool):
-    from intelligence.preferences import set_intelligence_enabled
-    res = set_intelligence_enabled(enable)
-    state = "yoqildi" if res else "to'xtatildi"
-    return f"Intelligence monitoringi {state}."
-
-def set_intelligence_interval_action(minutes: int):
-    from intelligence.preferences import set_check_interval
-    res = set_check_interval(minutes)
-    return f"Intelligence tekshiruv oralig'i har {res} daqiqaga o'zgartirildi."
-
-def start_profile_quiz_action():
-    from intelligence.onboarding import start_onboarding_quiz
-    text, keyboard = start_onboarding_quiz(ADMIN_ID)
-    send_message(ADMIN_ID, text, keyboard, parse_mode="HTML")
-    return "Profil anketasi boshlandi. Yuqoridagi tugmalar orqali tanlang."
-
-def start_interest_test_action(chat_id=None):
-    from personal_profile import start_interest_test
-    target_id = chat_id or ADMIN_ID
-    text, keyboard = start_interest_test(target_id)
-    send_message(target_id, text, keyboard, parse_mode="HTML")
-    return "🎯 Shaxsiy qiziqishlar testi boshlandi! Savollarga ketma-ket javob bering."
-
-def show_personal_profile_action(chat_id=None):
-    from personal_profile import load_personal_profile, format_profile_view, build_profile_action_keyboard
-    target_id = chat_id or ADMIN_ID
-    prof = load_personal_profile()
-    text = format_profile_view(prof)
-    kb = build_profile_action_keyboard()
-    send_message(target_id, text, kb, parse_mode="HTML")
-    return "Shaxsiy profilingiz yuqorida ko'rsatildi."
-
-def edit_personal_profile_action(chat_id=None):
-    from personal_profile import get_edit_menu_text_and_keyboard
-    target_id = chat_id or ADMIN_ID
-    text, kb = get_edit_menu_text_and_keyboard()
-    send_message(target_id, text, kb, parse_mode="HTML")
-    return "Profilni o'zgartirish menyusi ochildi."
-
-def add_personal_interest_action(item_name=None, priority="HIGH", chat_id=None):
-    from personal_profile import add_interest_to_profile, prompt_add_interest_text
-    target_id = chat_id or ADMIN_ID
-    if item_name:
-        ok, msg = add_interest_to_profile(item_name, priority)
-        send_message(target_id, msg, {"inline_keyboard": [[{"text": "📋 Profilimni ko'rsat", "callback_data": "pt_view_profile"}]]}, parse_mode="HTML")
-        return msg
-    else:
-        pending_actions[target_id] = {"type": "awaiting_add_interest"}
-        text, kb = prompt_add_interest_text()
-        send_message(target_id, text, kb, parse_mode="HTML")
-        return "Qo'shmoqchi bo'lgan qiziqishingizni yozib yuboring."
-
-def remove_personal_interest_action(item_name=None, chat_id=None):
-    from personal_profile import remove_interest_from_profile, prompt_remove_interest_text
-    target_id = chat_id or ADMIN_ID
-    if item_name:
-        found = remove_interest_from_profile(item_name)
-        if found:
-            res = f"✅ <b>'{item_name}'</b> profilingizdan muvaffaqiyatli olib tashlandi."
-        else:
-            res = f"⚠️ <b>'{item_name}'</b> profilingizda topilmadi."
-        send_message(target_id, res, {"inline_keyboard": [[{"text": "📋 Profilimni ko'rsat", "callback_data": "pt_view_profile"}]]}, parse_mode="HTML")
-        return res
-    else:
-        pending_actions[target_id] = {"type": "awaiting_remove_interest"}
-        text, kb = prompt_remove_interest_text()
-        send_message(target_id, text, kb, parse_mode="HTML")
-        return "O'chirmoqchi bo'lgan qiziqishingizni tanlang yoki nomini yozing."
-
-def show_personal_schedule_action(chat_id=None):
-    from personal_schedule import load_schedule, format_schedule_view, build_schedule_action_keyboard
-    target_id = chat_id or ADMIN_ID
-    sched = load_schedule()
-    text = format_schedule_view(sched)
-    kb = build_schedule_action_keyboard()
-    send_message(target_id, text, kb, parse_mode="HTML")
-    return "Shaxsiy vaqt jadvalingiz yuqorida ko'rsatildi."
-
-def get_today_free_time_action(chat_id=None):
-    from personal_schedule import get_today_free_time_info
-    target_id = chat_id or ADMIN_ID
-    text, kb = get_today_free_time_info()
-    send_message(target_id, text, kb, parse_mode="HTML")
-    return "Bugungi bo'sh vaqt va holatingiz yuqorida tahlil qilib berildi."
-
-def edit_personal_schedule_action(chat_id=None):
-    from personal_schedule import get_edit_menu_text_and_keyboard
-    target_id = chat_id or ADMIN_ID
-    text, kb = get_edit_menu_text_and_keyboard()
-    send_message(target_id, text, kb, parse_mode="HTML")
-    return "Jadvalni o'zgartirish menyusi ochildi."
-
-def check_job_schedule_action(job_start_time, job_end_time, job_days=None, is_remote=False, chat_id=None):
-    from personal_schedule import check_job_schedule_match
-    target_id = chat_id or ADMIN_ID
-    res = check_job_schedule_match(job_start_time, job_end_time, job_days, is_remote)
-    send_message(target_id, res["summary_uz"], parse_mode="HTML")
-    return res["summary_uz"]
-
-def show_location_profile_action(chat_id=None):
-    from location_transport import load_location_profile, format_location_view, build_location_action_keyboard
-    target_id = chat_id or ADMIN_ID
-    prof = load_location_profile()
-    text = format_location_view(prof)
-    kb = build_location_action_keyboard()
-    send_message(target_id, text, kb, parse_mode="HTML")
-    return "Joylashuv va transport profilingiz yuqorida ko'rsatildi."
-
-def edit_location_profile_action(chat_id=None):
-    from location_transport import start_location_setup
-    target_id = chat_id or ADMIN_ID
-    text, kb = start_location_setup(target_id)
-    send_message(target_id, text, kb, parse_mode="HTML")
-    return "Joylashuv va transport profilini sozlash boshlandi."
-
-def check_job_location_action(job_city="Toshkent", job_district=None, job_format="On-site", chat_id=None):
-    from location_transport import check_location_compatibility
-    target_id = chat_id or ADMIN_ID
-    res = check_location_compatibility(job_city, job_district, job_format)
-    send_message(target_id, res["summary_uz"], parse_mode="HTML")
-    return res["summary_uz"]
-
-def show_skills_profile_action(chat_id=None):
-    from skills_profile import load_skills_profile, format_skills_view, build_skills_action_keyboard
-    target_id = chat_id or ADMIN_ID
-    prof = load_skills_profile()
-    text = format_skills_view(prof)
-    kb = build_skills_action_keyboard()
-    send_message(target_id, text, kb, parse_mode="HTML")
-    return "Skills (ko'nikmalar) profilingiz yuqorida ko'rsatildi."
-
-def edit_skills_profile_action(chat_id=None):
-    from skills_profile import start_skills_wizard
-    target_id = chat_id or ADMIN_ID
-    text, kb = start_skills_wizard(target_id)
-    send_message(target_id, text, kb, parse_mode="HTML")
-    return "Ko'nikmalar so'rovnomasi boshlandi."
-
-def set_skill_level_action(skill_name, level, chat_id=None):
-    from skills_profile import load_skills_profile, save_skills_profile, LEVEL_BADGES, build_skills_action_keyboard
-    target_id = chat_id or ADMIN_ID
-    prof = load_skills_profile()
-    s_clean = skill_name.strip().lower()
-    match_key = None
-    for k in ["python", "linux", "networking", "siem", "git_github", "programming_languages", "cybersecurity_knowledge", "english", "russian", "experience"]:
-        if s_clean in k or k in s_clean:
-            match_key = k
-            break
-    if not match_key:
-        match_key = "python" if "py" in s_clean else ("linux" if "lin" in s_clean else "cybersecurity_knowledge")
-
-    norm_lvl = "Intermediate"
-    for l in ["Beginner", "Intermediate", "Advanced"]:
-        if l.lower() in level.lower():
-            norm_lvl = l
-            break
-
-    cur = prof.get(match_key, {})
-    if not isinstance(cur, dict):
-        cur = {"name": match_key, "items": []}
-    cur["level"] = norm_lvl
-    prof[match_key] = cur
-    save_skills_profile(prof)
-    badge = LEVEL_BADGES.get(norm_lvl, norm_lvl)
-    res = f"✅ <b>{match_key.capitalize()}</b> darajasi <b>{badge}</b> qilib belgilandi."
-    send_message(target_id, res, build_skills_action_keyboard(), parse_mode="HTML")
-    return res
-
-async def analyze_channels_recent_posts_action(hours=24):
-    from datetime import datetime, timedelta, timezone
-    from intelligence.sources import get_intelligence_folder_peers
-    from intelligence.analyzer import analyze_post_with_ai
-    from intelligence.formatter import format_intelligence_message, format_matched_vacancy_notification
-    from vacancy_analyzer import is_vacancy_post
-    from vacancy_matcher import match_vacancy_with_profile
-
-    send_message(ADMIN_ID, f"🔍 Oxirgi {hours} soat ichidagi postlar tahlil qilinmoqda, biroz kuting...")
-
-    peers, folder_title = await get_intelligence_folder_peers(telethon_client)
-
-    if not peers:
-        channels_list = []
-        async for dialog in telethon_client.iter_dialogs(limit=30):
-            if dialog.is_channel and not dialog.is_group:
-                channels_list.append(dialog.entity)
-        peers = channels_list[:15]
-
-    if not peers:
-        return "Tahlil qilish uchun hech qanday kanal topilmadi. Avval kanallarga a'zo bo'ling yoki '📂 Intelligence' papkasiga kanallarni qo'shing."
-
-    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
-    beneficial_posts = []
-    total_scanned = 0
-
-    for entity in peers:
-        title = getattr(entity, 'title', None) or getattr(entity, 'first_name', 'Kanal')
-        uname = getattr(entity, 'username', None)
-        try:
-            async for msg in telethon_client.iter_messages(entity, limit=20):
-                if not msg.date or msg.date < cutoff_time:
-                    break
-                if not msg.text or len(msg.text.strip()) < 30:
-                    continue
-
-                total_scanned += 1
-                post_link = f"https://t.me/{uname}/{msg.id}" if uname else ""
-
-                if is_vacancy_post(msg.text):
-                    match_result = match_vacancy_with_profile(msg.text)
-                    score = match_result.get("overall_score", match_result.get("match_score", 0))
-                    has_conflict = match_result.get("has_time_conflict", False)
-                    conflict_hrs = match_result.get("conflict_hours", 0)
-
-                    is_qualified = match_result.get("is_qualified", False)
-
-                    # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ va 6 ta mezonni bajargan bo'lsa
-                    if score >= 75 and is_qualified:
-                        from intelligence.digest import record_daily_item, generate_vacancy_digest_reason
-                        why_reason = generate_vacancy_digest_reason(match_result)
-                        record_daily_item(
-                            title=match_result.get("vacancy_summary", {}).get("title", "Vakansiya"),
-                            company=match_result.get("vacancy_summary", {}).get("company", ""),
-                            link=post_link,
-                            category="Vakansiya",
-                            score=score,
-                            level="URGENT" if score >= 90 else "USEFUL",
-                            why_match=why_reason,
-                            source=title
-                        )
-                        formatted_txt, kb = format_matched_vacancy_notification(match_result, source_title=title, post_link=post_link)
-                        send_message(ADMIN_ID, formatted_txt, kb, parse_mode="HTML")
-                        beneficial_posts.append((title, match_result.get("vacancy_summary", {}).get("title", "Vakansiya")))
-                        await asyncio.sleep(1.5)
-                else:
-                    analysis = analyze_post_with_ai(msg.text, channel_title=title)
-                    score = analysis.get("relevance_score", 0)
-
-                    # Faqat yuqori moslik: 🔥 90+ va 🟢 75+ avtomatik yuborilsin
-                    if score >= 75:
-                        from intelligence.digest import record_daily_item
-                        why_list = analysis.get("why_matches", [])
-                        why_reason = ", ".join(why_list[:2]) if why_list else "Profilingizga mos imkoniyat"
-                        record_daily_item(
-                            title=analysis.get("title", "Imkoniyat"),
-                            company=analysis.get("company", ""),
-                            link=post_link,
-                            category=",".join(analysis.get("categories", [])),
-                            score=score,
-                            level=analysis.get("level", "USEFUL"),
-                            why_match=why_reason,
-                            source=title
-                        )
-                        formatted_txt, kb = format_intelligence_message(analysis, source_title=title, post_link=post_link)
-                        send_message(ADMIN_ID, formatted_txt, kb, parse_mode="HTML")
-                        beneficial_posts.append((title, analysis.get("title", "")))
-                        await asyncio.sleep(1.5)
-
-                # Groq TPM limitidan oshib ketmaslik uchun kechikish:
-                await asyncio.sleep(4)
-        except Exception as e:
-            print(f"[ANALYZE ERROR] {title}: {e}")
-
-    if not beneficial_posts:
-        return f"✅ Tahlil yakunlandi. Jami {len(peers)} ta kanaldagi {total_scanned} ta post ko'rib chiqildi, biroq oxirgi {hours} soat ichida sizning profilingizga mos yuqori darajadagi e'lon chiqmadi."
-
-    return f"🎉 Tahlil yakunlandi! Jami {len(peers)} ta kanaldan {total_scanned} ta post tahlil qilinib, sizga mos {len(beneficial_posts)} ta manfaatli imkoniyat yuqorida yuborildi."
-
 tools = [
     {"type": "function", "function": {
         "name": "add_todo", "description": "Yangi vazifa/eslatma qo'shadi",
@@ -2337,139 +1964,6 @@ tools = [
         "parameters": {"type": "object", "properties": {
             "folder_name": {"type": "string", "description": "O'chiriladigan papka nomi"}
         }, "required": ["folder_name"]}}},
-    # ─── INTELLIGENCE TOOLLAR ─────────────────────────────────────────
-    {"type": "function", "function": {
-        "name": "get_intelligence_status",
-        "description": "Telegram '📂 Intelligence' / '📂 Addek' jildi holati, oxirgi tekshiruv vaqti, kuzatilayotgan kanallar ro'yxati va sozlamalarni ko'rsatadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "check_intelligence_now",
-        "description": "'📂 Intelligence' papkasidagi kanallarni hozirning o'zida bir marta to'liq tekshirish va yangi foydali imkoniyatlarni topish",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "get_today_digest_summary",
-        "description": "Bugun topilgan barcha foydali vakansiyalar, amaliyotlar va grantlar bo'yicha kunlik konspektni (Daily Digest) chiqaradi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "get_intelligence_preferences",
-        "description": "Intelligence filtri qoidalari, maqsadlari va yoqtirilgan/yoqtirilmagan mavzular ro'yxatini ko'rsatadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "toggle_intelligence",
-        "description": "Intelligence fon monitoringini yoqish yoki o'chirish",
-        "parameters": {"type": "object", "properties": {
-            "enable": {"type": "boolean", "description": "True = yoqish, False = to'xtatish"}
-        }, "required": ["enable"]}}},
-    {"type": "function", "function": {
-        "name": "set_intelligence_interval",
-        "description": "Intelligence tekshirish oralig'ini (interval) daqiqalarda belgilash (standart: 30 daqiqa, yoki 60 daqiqa)",
-        "parameters": {"type": "object", "properties": {
-            "minutes": {"type": "integer", "description": "Daqiqalar soni (kamida 5 daqiqa, masalan: 30, 60)"}
-        }, "required": ["minutes"]}}},
-    {"type": "function", "function": {
-        "name": "start_profile_quiz",
-        "description": "Foydalanuvchining soha, tajriba, maqsad va joylashuvini aniqlaydigan interaktiv shaxsiy anketani (profil testini) boshlaydi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "analyze_channels_recent_posts",
-        "description": "Kanallardagi oxirgi postlarni (masalan: 24 soat ichida yozilgan postlarni) o'qib, AI orqali tahlil qilib, foydalanuvchiga mos keluvchi manfaatli imkoniyat va vakansiyalarni topib beradi",
-        "parameters": {"type": "object", "properties": {
-            "hours": {"type": "integer", "description": "Necha soatlik postlarni tahlil qilish (standart: 24 soat)"}
-        }}}},
-    {"type": "function", "function": {
-        "name": "start_interest_test",
-        "description": "Foydalanuvchining shaxsiy qiziqishlari, sohasi, kiberxavfsizlik yo'nalishlari, texnologiyalari, maosh va karyera maqsadini aniqlovchi 9 bosqichli testni boshlaydi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "show_personal_profile",
-        "description": "Foydalanuvchining to'liq shaxsiy profili va ustuvor qiziqishlarini ko'rsatadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "edit_personal_profile",
-        "description": "Foydalanuvchining shaxsiy profilini tahrirlash menyusini ko'rsatadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "add_personal_interest",
-        "description": "Foydalanuvchi profiliga yangi qiziqish yoki texnologiya qo'shadi",
-        "parameters": {"type": "object", "properties": {
-            "item_name": {"type": "string", "description": "Qo'shiladigan qiziqish yoki texnologiya nomi (masalan: 'Docker', 'SIEM', 'Python')"},
-            "priority": {"type": "string", "enum": ["HIGH", "MEDIUM", "LOW"], "description": "Ustuvorlik darajasi (standart: HIGH)"}
-        }}}},
-    {"type": "function", "function": {
-        "name": "remove_personal_interest",
-        "description": "Foydalanuvchi profilidan biror qiziqish yoki texnologiyani olib tashlaydi/o'chiradi",
-        "parameters": {"type": "object", "properties": {
-            "item_name": {"type": "string", "description": "O'chiriladigan qiziqish nomi"}
-        }}}},
-    {"type": "function", "function": {
-        "name": "show_personal_schedule",
-        "description": "Foydalanuvchining shaxsiy vaqt jadvalini (uydan chiqish, o'qish/ish, yo'l, uyga qaytish, bo'sh vaqt, dam olish) ko'rsatadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "get_today_free_time",
-        "description": "Bugun qachon bo'sh ekanligini, bo'sh soatlarni va ayni vaqtdagi bandlik statusini ko'rsatadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "edit_personal_schedule",
-        "description": "Foydalanuvchining shaxsiy vaqt jadvalini o'zgartirish menyusini ochadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "check_job_schedule",
-        "description": "Vakansiya ish vaqtini foydalanuvchi jadvali bilan solishtirib, to'qnashuvlar va moslik darajasini tekshiradi",
-        "parameters": {"type": "object", "properties": {
-            "job_start_time": {"type": "string", "description": "Vakansiya ish boshlanish vaqti (masalan '09:00', '14:00')"},
-            "job_end_time": {"type": "string", "description": "Vakansiya ish tugash vaqti (masalan '18:00', '19:00')"},
-            "is_remote": {"type": "boolean", "description": "Masofaviy ish (remote) ekanligi (standart: false)"}
-        }, "required": ["job_start_time", "job_end_time"]}}},
-    {"type": "function", "function": {
-        "name": "show_location_profile",
-        "description": "Foydalanuvchining shaxsiy joylashuv va transport profilini (shahar, tuman, remote/hybrid/ofis munosabati, yo'l vaqti, transport) ko'rsatadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "edit_location_profile",
-        "description": "Joylashuv va transport profilini o'zgartirish menyusini ochadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "check_job_location",
-        "description": "Vakansiya manzili (shahar, tuman, remote/hybrid/ofis) foydalanuvchi joylashuviga mos kelishini tekshiradi",
-        "parameters": {"type": "object", "properties": {
-            "job_city": {"type": "string", "description": "Vakansiya shahri (masalan 'Toshkent')"},
-            "job_district": {"type": "string", "description": "Vakansiya tumani (masalan 'Shayxontohur')"},
-            "job_format": {"type": "string", "enum": ["Remote", "Hybrid", "On-site"], "description": "Ish formati"}
-        }, "required": ["job_city"]}}},
-    {"type": "function", "function": {
-        "name": "show_skills_profile",
-        "description": "Foydalanuvchining ko'nikmalar profilini (universitet, kurslar, sertifikatlar, python, linux, siem, networking, ingliz/rus tili, darajalari) ko'rsatadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "edit_skills_profile",
-        "description": "Ko'nikmalar profilini to'ldirish yoki o'zgartirish menyusini ochadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "set_skill_level",
-        "description": "Aniq bir texnik ko'nikma darajasini (Beginner, Intermediate, Advanced) belgilaydi",
-        "parameters": {"type": "object", "properties": {
-            "skill_name": {"type": "string", "description": "Ko'nikma nomi (masalan: Python, Linux, SIEM, Networking, English...)"},
-            "level": {"type": "string", "enum": ["Beginner", "Intermediate", "Advanced"], "description": "Daraja: Beginner, Intermediate yoki Advanced"}
-        }, "required": ["skill_name", "level"]}}},
-    {"type": "function", "function": {
-        "name": "adjust_opportunity_feedback",
-        "description": "Vakansiya yoki imkoniyatlar bo'yicha foydalanuvchi fikrini (feedback) qabul qiladi va ustuvorlikni oshiradi yoki kamaytiradi (masalan: 'SOC vakansiyalarini ko'proq yubor', 'Frontend kerak emas')",
-        "parameters": {"type": "object", "properties": {
-            "topic": {"type": "string", "description": "Yo'nalish yoki mavzu (masalan: 'SOC', 'SIEM', 'Frontend', 'Python', yoki 'last_opportunity')"},
-            "action": {"type": "string", "enum": ["boost", "reduce"], "description": "'boost' (ko'proq yuborish / juda foydali) yoki 'reduce' (kerak emas / kamaytirish)"},
-            "note": {"type": "string", "description": "Foydalanuvchi aytgan asl matn yoki sabab"}
-        }, "required": ["topic", "action"]}}},
-    {"type": "function", "function": {
-        "name": "get_opportunity_feedback_summary",
-        "description": "Foydalanuvchining vakansiyalar bo'yicha bildirgan barcha feedbacklari va hozirgi ustuvorlik holatini ko'rsatadi",
-        "parameters": {"type": "object", "properties": {}}}},
-    {"type": "function", "function": {
-        "name": "evaluate_vacancy_match",
-        "description": "Vakansiya yoki ish e'loni matnini foydalanuvchining 6 ta mezoni (Qiziqish, Vaqt, Joy, Skill, Tajriba, Karyera) bo'yicha birlashtirib, chuqur tahlil qiladi va moslik hisobotini beradi",
-        "parameters": {"type": "object", "properties": {
-            "vacancy_text": {"type": "string", "description": "Tekshirilishi kerak bo'lgan vakansiya matni yoki tavsifi"}
-        }, "required": ["vacancy_text"]}}}
 ]
 
 def call_groq(messages, use_tools=True, temperature=0.7):
@@ -2503,13 +1997,6 @@ def call_groq(messages, use_tools=True, temperature=0.7):
                     msg = err_info.get("message", "")
                     print(f"[GROQ {current_model} - Urinish {attempt + 1}]: {code or msg}")
                     if code == "rate_limit_exceeded" or "rate limit" in str(msg).lower() or "tokens per day" in str(msg).lower() or "tpd" in str(msg).lower():
-                        if "tokens per day" in str(msg).lower() or "tpd" in str(msg).lower():
-                            print(f"[GROQ] Kunlik token limiti (TPD) tugaganligi aniqlandi. Intelligence monitoring bugun uchun to'xtatiladi.")
-                            try:
-                                from intelligence.state import set_daily_tpd_paused
-                                set_daily_tpd_paused(True)
-                            except Exception:
-                                pass
                         print(f"[GROQ] {current_model} limiti band, keyingi zaxira modelga o'tilmoqda...")
                         break
                     import time
@@ -2678,85 +2165,6 @@ async def get_ai_response(chat_id, user_text):
             func_result = await get_auto_delete_setting_action(**func_args)
         elif func_name == "get_content_settings":
             func_result = await get_content_settings_action()
-        # ─── INTELLIGENCE DIRECT HANDLERS ────────────────────────────
-        elif func_name == "get_intelligence_status":
-            func_result = await get_intelligence_status_action()
-        elif func_name == "check_intelligence_now":
-            func_result = await check_intelligence_now_action()
-        elif func_name == "get_today_digest_summary":
-            func_result = get_today_digest_summary_action()
-        elif func_name == "get_intelligence_preferences":
-            func_result = get_intelligence_preferences_action()
-        elif func_name == "toggle_intelligence":
-            func_result = toggle_intelligence_action(**func_args)
-        elif func_name == "set_intelligence_interval":
-            func_result = set_intelligence_interval_action(**func_args)
-        elif func_name == "start_profile_quiz":
-            func_result = start_profile_quiz_action()
-        elif func_name == "analyze_channels_recent_posts":
-            func_result = await analyze_channels_recent_posts_action(**func_args)
-        elif func_name == "start_interest_test":
-            func_result = start_interest_test_action(chat_id)
-        elif func_name == "show_personal_profile":
-            func_result = show_personal_profile_action(chat_id)
-        elif func_name == "edit_personal_profile":
-            func_result = edit_personal_profile_action(chat_id)
-        elif func_name == "add_personal_interest":
-            func_result = add_personal_interest_action(chat_id=chat_id, **func_args)
-        elif func_name == "remove_personal_interest":
-            func_result = remove_personal_interest_action(chat_id=chat_id, **func_args)
-        elif func_name == "show_personal_schedule":
-            func_result = show_personal_schedule_action(chat_id)
-        elif func_name == "get_today_free_time":
-            func_result = get_today_free_time_action(chat_id)
-        elif func_name == "edit_personal_schedule":
-            func_result = edit_personal_schedule_action(chat_id)
-        elif func_name == "check_job_schedule":
-            func_result = check_job_schedule_action(chat_id=chat_id, **func_args)
-        elif func_name == "show_location_profile":
-            func_result = show_location_profile_action(chat_id)
-        elif func_name == "edit_location_profile":
-            func_result = edit_location_profile_action(chat_id)
-        elif func_name == "check_job_location":
-            func_result = check_job_location_action(chat_id=chat_id, **func_args)
-        elif func_name == "show_skills_profile":
-            func_result = show_skills_profile_action(chat_id)
-        elif func_name == "edit_skills_profile":
-            func_result = edit_skills_profile_action(chat_id)
-        elif func_name == "set_skill_level":
-            func_result = set_skill_level_action(chat_id=chat_id, **func_args)
-        elif func_name == "adjust_opportunity_feedback":
-            from feedback_manager import record_topic_adjustment, get_last_registered_opportunity
-            topic = func_args.get("topic", "")
-            action = func_args.get("action", "boost")
-            note = func_args.get("note", "")
-            if topic == "last_opportunity" or not topic:
-                last_item = get_last_registered_opportunity()
-                if last_item and last_item.get("topics"):
-                    topic = last_item["topics"][0]
-                else:
-                    topic = "oxirgi_vakansiya"
-            _, msg, _ = record_topic_adjustment(topic, action=action, note=note)
-            send_message(chat_id, msg, parse_mode="HTML")
-            func_result = msg
-        elif func_name == "get_opportunity_feedback_summary":
-            from feedback_manager import get_feedback_summary_text
-            summary_txt = get_feedback_summary_text()
-            send_message(chat_id, summary_txt, parse_mode="HTML")
-            func_result = summary_txt
-        elif func_name == "evaluate_vacancy_match":
-            vac_text = func_args.get("vacancy_text", "")
-            from vacancy_matcher import match_vacancy_with_profile, format_match_report
-            from intelligence.formatter import format_matched_vacancy_notification
-            match_res = match_vacancy_with_profile(vac_text)
-            if match_res.get("is_qualified") and match_res.get("overall_score", 0) >= 75:
-                formatted_txt, kb = format_matched_vacancy_notification(match_res, source_title="Foydalanuvchi so'rovi")
-                send_message(chat_id, formatted_txt, kb, parse_mode="HTML")
-            else:
-                rep = format_match_report(match_res)
-                send_message(chat_id, rep, parse_mode="HTML")
-            func_result = f"Vakansiya mosligi 6 mezon bo'yicha tahlil qilindi. Ball: {match_res.get('overall_score')}%, Natija: {match_res.get('overall_status')}."
-
         # ─── YANGI CONFIRM KERAK BO'LGAN FUNKSIYALAR ────────────────
         elif func_name == "request_update_name":
             first_name = func_args.get("first_name")
@@ -3325,58 +2733,6 @@ async def handle_callback(callback_query):
         send_message(chat_id, ver_text, parse_mode="HTML")
         return
 
-    # ─── SHAXSIY PROFIL VA QIZIQISHLAR TESTI CALLBACKS ─────────────
-    if data.startswith("pt_"):
-        if data == "pt_action_add":
-            pending_actions[chat_id] = {"type": "awaiting_add_interest"}
-        elif data == "pt_action_del":
-            pending_actions[chat_id] = {"type": "awaiting_remove_interest"}
-        from personal_profile import handle_profile_callback
-        reply_txt, reply_kb = handle_profile_callback(chat_id, data)
-        if reply_txt:
-            send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
-        return
-
-    # ─── SHAXSIY VAQT JADVALI CALLBACKS ────────────────────────────
-    if data.startswith("sc_"):
-        from personal_schedule import handle_schedule_callback
-        reply_txt, reply_kb = handle_schedule_callback(chat_id, data)
-        if reply_txt:
-            send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
-        return
-
-    # ─── JOYLASHUV VA TRANSPORT CALLBACKS ─────────────────────────
-    if data.startswith("loc_"):
-        from location_transport import handle_location_callback
-        reply_txt, reply_kb = handle_location_callback(chat_id, data)
-        if reply_txt:
-            send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
-        return
-
-    # ─── SKILLS PROFILE CALLBACKS ─────────────────────────────────
-    if data.startswith("sk_"):
-        from skills_profile import handle_skills_callback
-        reply_txt, reply_kb = handle_skills_callback(chat_id, data)
-        if reply_txt:
-            send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
-        return
-
-    # ─── ONBOARDING VA INTELLIGENCE FEEDBACK CALLBACKS ──────────────
-    if data.startswith("ob_"):
-        from intelligence.onboarding import handle_onboarding_callback
-        reply_txt, reply_kb = handle_onboarding_callback(chat_id, data)
-        if reply_txt:
-            send_message(chat_id, reply_txt, reply_kb, parse_mode="HTML")
-        return
-
-    if data == "run_full_analysis":
-        send_message(chat_id, "🔍 Kuzatuvdagi barcha kanallar tahlil qilinmoqda (oxirgi 24 soatlik postlar)... Iltimos, biroz kuting.")
-        async def _do_analysis():
-            res = await analyze_channels_recent_posts_action(hours=24)
-            send_message(ADMIN_ID, res)
-        asyncio.create_task(_do_analysis())
-        return
-
     if data == "open_menu":
         status_text = "🟢 Onlaynsiz" if not is_autoreply_enabled() else "🔴 Oflaynsiz (avtojavob yoqilgan)"
         send_message(chat_id, f"Hozirgi holat: {status_text}\n\nHolatni tanlang:", build_menu_keyboard())
@@ -3389,57 +2745,6 @@ async def handle_callback(callback_query):
             build_tg_settings_keyboard(),
             parse_mode="HTML"
         )
-        return
-
-    if data == "noop":
-        answer_callback(callback_query["id"], "Fikringiz avval saqlangan.")
-        return
-
-    # ─── OPPORTUNITY FEEDBACK (✅ Kerak, ❌ Kerak emas, ⭐ Juda foydali) ───
-    if data.startswith("fb_") or data.startswith("fb:"):
-        from feedback_manager import record_opportunity_feedback
-        norm_fb = data.replace("fb:", "fb_")
-        parts = norm_fb.split(":")
-        act_part = parts[0].split("_")[1] if len(parts[0].split("_")) > 1 else "k"
-        opp_id = parts[1] if len(parts) > 1 else ""
-
-        ok, reply_text, topics = record_opportunity_feedback(opp_id, action_code=act_part, feedback_source="button")
-        
-        # Tugmani bosilgan holatga almashtirish
-        msg_obj = callback_query.get("message", {})
-        msg_id = msg_obj.get("message_id")
-        if msg_id:
-            if act_part == "s":
-                badge_text = "⭐ Belgilandi: Juda foydali"
-            elif act_part == "x":
-                badge_text = "❌ Belgilandi: Kerak emas"
-            else:
-                badge_text = "✅ Belgilandi: Kerak"
-            edit_message_reply_markup(chat_id, msg_id, {"inline_keyboard": [[{"text": badge_text, "callback_data": "noop"}]]})
-
-        answer_callback(callback_query["id"], "Fikringiz saqlandi!")
-        send_message(chat_id, reply_text, parse_mode="HTML")
-        return
-
-    if data in ["intel_fb_like", "intel_fb_dislike", "intel_src_mute"]:
-        act_part = "k" if data == "intel_fb_like" else "x"
-        from feedback_manager import record_opportunity_feedback
-        ok, reply_text, topics = record_opportunity_feedback("", action_code=act_part, feedback_source="button")
-        send_message(chat_id, reply_text, parse_mode="HTML")
-        return
-
-    if data == "start_quiz":
-        start_interest_test_action(ADMIN_ID)
-        return
-
-    if data == "quick_intel":
-        from intelligence.preferences import is_intelligence_enabled, get_check_interval
-        from intelligence.config import load_user_profile
-        prof = load_user_profile()
-        field = prof.get("primary_field", "Belgilanmagan")
-        status = "Yoqilgan" if is_intelligence_enabled() else "O'chirilgan"
-        interval = get_check_interval()
-        send_message(chat_id, f"📂 <b>Intelligence tizimi:</b>\n\n• Holati: <b>{status}</b>\n• Oraliq: Har <b>{interval}</b> daqiqada\n• Asosiy yo'nalish: <b>{field}</b>\n\nQayta anketa to'ldirish uchun /quiz buyrug'ini yuboring.", parse_mode="HTML")
         return
 
     if data == "set_online":
@@ -3824,15 +3129,7 @@ async def autoreply_handler(event):
 
 async def bot_polling_loop():
     print("Bot ishga tushdi...")
-    try:
-        from intelligence.config import load_user_profile
-        prof = load_user_profile()
-        if not prof.get("onboarding_completed", False):
-            from intelligence.onboarding import start_onboarding_quiz
-            text_q, kb_q = start_onboarding_quiz(ADMIN_ID)
-            send_message(ADMIN_ID, text_q, kb_q, parse_mode="HTML")
-    except Exception as e:
-        print("[BOOT ONBOARDING]:", e)
+
 
     offset = None
     while True:
@@ -3862,197 +3159,26 @@ async def bot_polling_loop():
                         send_message(chat_id, "Kechirasiz, bu shaxsiy yordamchi bot va faqat egasi uchun ishlaydi.")
                         continue
 
-                    # ─── AGAR JOYLASHUV SOZLASH JARAYONIDA BO'LSA ─────────
-                    from location_transport import is_in_location_setup, process_location_input, cancel_location_setup
-                    if is_in_location_setup(chat_id):
-                        norm_check = text.strip().lower()
-                        if norm_check in ["bekor qilish", "/cancel", "cancel", "bekor"]:
-                            cancel_location_setup(chat_id)
-                            send_message(chat_id, "❌ Joylashuv sozlash bekor qilindi.", {"inline_keyboard": [[{"text": "📍 Manzilimni ko'rsat", "callback_data": "loc_view"}]]})
-                            continue
-                        ans_text, ans_kb = process_location_input(chat_id, text)
-                        if ans_text:
-                            send_message(chat_id, ans_text, ans_kb, parse_mode="HTML")
-                        continue
-
-                    # ─── AGAR SKILLS SO'ROVNOMASIDA BO'LSA ────────────────
-                    from skills_profile import is_in_skills_setup, process_skills_input, cancel_skills_setup
-                    if is_in_skills_setup(chat_id):
-                        norm_check = text.strip().lower()
-                        if norm_check in ["bekor qilish", "/cancel", "cancel", "bekor"]:
-                            cancel_skills_setup(chat_id)
-                            send_message(chat_id, "❌ Ko'nikmalar so'rovi bekor qilindi.", {"inline_keyboard": [[{"text": "🛠 Skills ko'rsatish", "callback_data": "sk_view"}]]})
-                            continue
-                        ans_text, ans_kb = process_skills_input(chat_id, text)
-                        if ans_text:
-                            send_message(chat_id, ans_text, ans_kb, parse_mode="HTML")
-                        continue
-
-                    # ─── AGAR JADVAL SOZLASH JARAYONIDA BO'LSA ─────────────
-                    from personal_schedule import is_in_schedule_setup, process_schedule_input, cancel_schedule_setup
-                    if is_in_schedule_setup(chat_id):
-                        norm_check = text.strip().lower()
-                        if norm_check in ["bekor qilish", "/cancel", "cancel", "bekor"]:
-                            cancel_schedule_setup(chat_id)
-                            send_message(chat_id, "❌ Jadval kiritish bekor qilindi.", {"inline_keyboard": [[{"text": "🗓 Jadvalimni ko'rsat", "callback_data": "sc_view"}]]})
-                            continue
-                        ans_text, ans_kb = process_schedule_input(chat_id, text)
-                        if ans_text:
-                            send_message(chat_id, ans_text, ans_kb, parse_mode="HTML")
-                        continue
-
-                    # ─── AGAR QIZIQISHLAR TESTI JARAYONIDA BO'LSA ─────────
-                    from personal_profile import is_in_interest_test, process_test_input, cancel_interest_test
-                    if is_in_interest_test(chat_id):
-                        norm_check = text.strip().lower()
-                        if norm_check in ["bekor qilish", "/cancel", "cancel", "bekor"]:
-                            cancel_interest_test(chat_id)
-                            send_message(chat_id, "❌ Qiziqishlar testi bekor qilindi.", {"inline_keyboard": [[{"text": "🎯 Testni qayta boshlash", "callback_data": "pt_start_test"}]]})
-                            continue
-                        ans_text, ans_kb = process_test_input(chat_id, text)
-                        if ans_text:
-                            send_message(chat_id, ans_text, ans_kb, parse_mode="HTML")
-                        continue
-
+                    
                     normalized = text.strip().lower()
                     norm_clean = normalized.replace("‘", "'").replace("’", "'").replace("`", "'").replace("ʻ", "'").replace("ʼ", "'")
+                    cmd_word = normalized.split()[0].split("@")[0] if normalized else ""
 
-                    # ─── SHAXSIY PROFIL VA QIZIQISHLAR TESTI BUYRUQLARI ───
-                    if norm_clean in ["qiziqish testini boshlash", "qiziqish testi", "/interest_test", "/qiziqish_testi", "testni boshlash"]:
-                        start_interest_test_action(chat_id)
-                        continue
-
-                    if norm_clean in ["profilimni ko'rsat", "profilimni korsat", "profilni ko'rsat", "profilni korsat", "profilim", "/profil", "/profile", "shaxsiy profilim"]:
-                        show_personal_profile_action(chat_id)
-                        continue
-
-                    if norm_clean in ["profilimni o'zgartirish", "profilimni ozgartirish", "profilni o'zgartirish", "/edit_profile"]:
-                        edit_personal_profile_action(chat_id)
-                        continue
-
-                    if norm_clean.startswith("qiziqishimni qo'sh") or norm_clean.startswith("qiziqish qo'sh") or norm_clean.startswith("qiziqishimni qosh") or norm_clean.startswith("qiziqish qosh"):
-                        parts = re.split(r"qiziqish(?:imni)?\s+qo['ʻ`ʼ]?sh[:\s]*", text, flags=re.IGNORECASE)
-                        item_part = parts[-1].strip() if len(parts) > 1 else ""
-                        if item_part:
-                            add_personal_interest_action(item_name=item_part, chat_id=chat_id)
-                        else:
-                            add_personal_interest_action(chat_id=chat_id)
-                        continue
-
-                    if any(norm_clean.startswith(p) for p in ["qiziqishimni olib tashla", "qiziqishni olib tashla", "qiziqishimni o'chir", "qiziqishni o'chir", "qiziqishni ochir"]):
-                        parts = re.split(r"qiziqish(?:imni|ni)?\s+(?:olib\s+tashla|o['ʻ`ʼ]?chir)[:\s]*", text, flags=re.IGNORECASE)
-                        item_part = parts[-1].strip() if len(parts) > 1 else ""
-                        if item_part:
-                            remove_personal_interest_action(item_name=item_part, chat_id=chat_id)
-                        else:
-                            remove_personal_interest_action(chat_id=chat_id)
-                        continue
-
-                    # ─── SHAXSIY VAQT JADVALI BUYRUQLARI ──────────────────
-                    if norm_clean in ["jadvalimni ko'rsat", "jadvalimni korsat", "jadvalni ko'rsat", "jadvalni korsat", "jadvalim", "jadval", "/jadval", "/schedule"]:
-                        show_personal_schedule_action(chat_id)
-                        continue
-
-                    if any(norm_clean.startswith(p) for p in ["bugun qachon bo'shman", "bugun qachon boshman", "qachon bo'shman", "qachon boshman", "bugungi bo'sh vaqtim", "/free_time", "/bosh_vaqt"]):
-                        get_today_free_time_action(chat_id)
-                        continue
-
-                    if norm_clean in ["jadvalimni o'zgartir", "jadvalimni ozgartir", "jadvalni o'zgartir", "jadvalni ozgartir", "jadvalni o'zgartirish", "/edit_schedule"]:
-                        edit_personal_schedule_action(chat_id)
-                        continue
-
-                    # ─── JOYLASHUV VA TRANSPORT BUYRUQLARI ────────────────
-                    if norm_clean in ["manzilimni ko'rsat", "manzilimni korsat", "joylashuvimni ko'rsat", "joylashuvimni korsat", "manzilim", "joylashuvim", "location", "/location", "/manzil"]:
-                        show_location_profile_action(chat_id)
-                        continue
-
-                    if norm_clean in ["manzilimni o'zgartir", "manzilimni ozgartir", "joylashuvimni o'zgartir", "joylashuvimni ozgartir", "manzilni o'zgartirish", "/edit_location"]:
-                        edit_location_profile_action(chat_id)
-                        continue
-
-                    # ─── SKILLS PROFILE BUYRUQLARI ────────────────────────
-                    if norm_clean in ["skills", "/skills", "ko'nikmalar", "ko'nikmalarim", "skilllarim", "skilllar", "skills profile", "skills profil", "ko'nikmalarimni ko'rsat", "skilllarimni ko'rsat", "skills ko'rsat", "darajalarim"]:
-                        show_skills_profile_action(chat_id)
-                        continue
-
-                    if norm_clean in ["skills o'zgartir", "skills ozgartir", "ko'nikmalarni o'zgartir", "ko'nikmalarni ozgartir", "skillarni o'zgartir", "/edit_skills", "skills testi", "ko'nikmalar testi", "skills sozlash"]:
-                        edit_skills_profile_action(chat_id)
-                        continue
-
-                    if normalized in ["/quiz", "anketa", "/anketa", "test", "/test"]:
-                        start_interest_test_action(ADMIN_ID)
-                        continue
-
-                    if (
-                        normalized in ["/tahlil", "tahlil", "/analiz", "analiz"]
-                        or text.startswith("/tahlil")
-                        or text.startswith("/analiz")
-                        or norm_clean in [
-                            "kanallarni tahlil qil", "kanallarni tahlil qilish",
-                            "kanallarni tekshir", "kanallarni tekshirish",
-                            "postlarni tahlil qil", "postlarni tahlil qilish",
-                            "postlarni tekshir", "postlarni tekshirish",
-                            "vakansiyalarni tahlil qil", "vakansiyalarni tekshir",
-                            "yangi postlarni tahlil qil", "yangi postlarni tekshir"
-                        ]
-                    ):
-                        parts = text.split()
-                        hours = 24
-                        if len(parts) > 1 and parts[1].isdigit():
-                            hours = int(parts[1])
-                        send_message(chat_id, f"🔍 Kuzatuvdagi barcha kanallar tahlil qilinmoqda (oxirgi {hours} soatlik postlar)... Iltimos, biroz kuting.")
-                        async def _do_analysis_cmd(h=hours):
-                            res = await analyze_channels_recent_posts_action(hours=h)
-                            send_message(ADMIN_ID, res)
-                        asyncio.create_task(_do_analysis_cmd())
-                        continue
-
-                    if text.startswith("/vakansiya") or text.startswith("/tekshir"):
-                        vac_body = text.split(" ", 1)[1] if " " in text else ""
-                        if not vac_body.strip():
-                            send_message(chat_id, "ℹ️ Vakansiyani 6 mezon bo'yicha tahlil qilish uchun matnni kiriting:\nMasalan: <code>/tekshir [vakansiya matni]</code>", parse_mode="HTML")
-                        else:
-                            from vacancy_matcher import match_vacancy_with_profile, format_match_report
-                            from intelligence.formatter import format_matched_vacancy_notification
-                            send_message(chat_id, "⏳ Vakansiya 6 ta asosiy mezon bo'yicha tahlil qilinmoqda...")
-                            match_res = match_vacancy_with_profile(vac_body)
-                            if match_res.get("is_qualified") and match_res.get("overall_score", 0) >= 75:
-                                formatted_txt, kb = format_matched_vacancy_notification(match_res, source_title="Shaxsiy tahlil")
-                                send_message(chat_id, formatted_txt, kb, parse_mode="HTML")
-                            else:
-                                rep = format_match_report(match_res)
-                                send_message(chat_id, rep, parse_mode="HTML")
-                        continue
-
-                    if norm_clean in ["/digest", "digest", "hisobot", "/hisobot", "bugungi hisobot", "kunlik hisobot", "kunlik hisobotim", "kunlik xulosa", "/kunlik_xulosa"]:
-                        from intelligence.digest import get_today_digest
-                        digest_txt = get_today_digest()
-                        send_message(chat_id, digest_txt, parse_mode="HTML")
-                        continue
-
-                    if normalized in ["/update", "update", "/yangila", "yangila"]:
+                    if cmd_word in ["/update", "update", "/yangila", "yangila"]:
                         asyncio.create_task(perform_system_update_action(chat_id))
                         continue
 
-                    if normalized in ["/version", "version", "/versiya", "versiya", "/info", "info", "/holat", "holat"]:
+                    if cmd_word in ["/version", "version", "/versiya", "versiya", "/info", "info", "/holat", "holat"]:
                         ver_text = get_system_version_info()
                         send_message(chat_id, ver_text, parse_mode="HTML")
                         continue
 
-                    if normalized in ["/menu", "/start", "menyu", "menu", "/menyu"]:
-                        from intelligence.config import load_user_profile
-                        prof = load_user_profile()
-                        if not prof.get("onboarding_completed", False):
-                            from intelligence.onboarding import start_onboarding_quiz
-                            text_q, kb_q = start_onboarding_quiz(ADMIN_ID)
-                            send_message(ADMIN_ID, text_q, kb_q, parse_mode="HTML")
-                            continue
-
-                        status_text = "\U0001f7e2 Onlaynsiz" if not is_autoreply_enabled() else "\U0001f534 Oflaynsiz (avtojavob yoqilgan)"
+                    if cmd_word in ["/menu", "/start", "menyu", "menu", "/menyu"]:
+                        status_text = "🟢 Onlaynsiz" if not is_autoreply_enabled() else "🔴 Oflaynsiz (avtojavob yoqilgan)"
                         send_message(chat_id, f"Hozirgi holat: {status_text}\n\nHolatni tanlang:", build_menu_keyboard())
                         continue
 
-                    if norm_clean in ["tg sozlamalari", "telegram sozlamalari", "tg sozlamalar", "telegram sozlamalar", "/tg_settings", "/settings", "sozlamalar"] or normalized in ["/tg_settings", "/settings"]:
+                    if norm_clean in ["tg sozlamalari", "telegram sozlamalari", "tg sozlamalar", "telegram sozlamalar", "/tg_settings", "/settings", "sozlamalar"] or cmd_word in ["/tg_settings", "/settings"]:
                         send_message(
                             chat_id,
                             "⚙️ <b>Telegram Hisob Sozlamalari</b>\n\nQuyidagi bo'limlardan birini tanlang:",
@@ -4061,108 +3187,60 @@ async def bot_polling_loop():
                         )
                         continue
 
-                    # ─── OPPORTUNITY FEEDBACK BUYRUQLARI VA MATNLARI ──────
-                    if norm_clean in ["feedback", "/feedback", "fikrlarim", "ustuvorliklar", "/ustuvorlik", "feedback holati"]:
-                        from feedback_manager import get_feedback_summary_text
-                        send_message(chat_id, get_feedback_summary_text(), parse_mode="HTML")
+                    pending = pending_actions.get(chat_id)
+                    if pending and pending.get("type") == "awaiting_filter_names":
+                        mode = pending["mode"]
+                        names = [n.strip() for n in text.split(",") if n.strip()]
+                        resolved_ids = []
+                        resolved_keys = []
+                        not_found = []
+                        for name in names:
+                            matches = find_contacts(name)
+                            if not matches:
+                                not_found.append(name)
+                                continue
+                            key, identifier = matches[0]
+                            resolved_keys.append(key)
+                            resolved_ids.append(identifier.lower() if identifier.startswith("@") else identifier)
+                        set_filter_mode(mode, resolved_ids)
+                        del pending_actions[chat_id]
+                        mode_label = "faqat shu kontaktlarga" if mode == "only" else "shu kontaktlardan tashqari hammaga"
+                        reply_text = f"✅ Endi {mode_label} avtomatik javob beriladi:\n" + ", ".join(resolved_keys)
+                        if not_found:
+                            reply_text += f"\n\nTopilmadi: {', '.join(not_found)}"
+                        send_message(chat_id, reply_text)
                         continue
 
-                    from feedback_manager import process_natural_language_feedback
-                    is_fb, fb_reply = process_natural_language_feedback(text)
-                    if is_fb and fb_reply:
-                        send_message(chat_id, fb_reply, parse_mode="HTML")
-                        continue
-
-
-                pending = pending_actions.get(chat_id)
-                if pending and pending.get("type") == "awaiting_filter_names":
-                    mode = pending["mode"]
-                    names = [n.strip() for n in text.split(",") if n.strip()]
-                    resolved_ids = []
-                    resolved_keys = []
-                    not_found = []
-                    for name in names:
-                        matches = find_contacts(name)
-                        if not matches:
-                            not_found.append(name)
-                            continue
-                        key, identifier = matches[0]
-                        resolved_keys.append(key)
-                        resolved_ids.append(identifier.lower() if identifier.startswith("@") else identifier)
-                    set_filter_mode(mode, resolved_ids)
-                    del pending_actions[chat_id]
-                    mode_label = "faqat shu kontaktlarga" if mode == "only" else "shu kontaktlardan tashqari hammaga"
-                    reply_text = f"\u2705 Endi {mode_label} avtomatik javob beriladi:\n" + ", ".join(resolved_keys)
-                    if not_found:
-                        reply_text += f"\n\nTopilmadi: {', '.join(not_found)}"
-                    send_message(chat_id, reply_text)
-                    continue
-
-                if pending and pending.get("type") == "awaiting_add_interest":
-                    del pending_actions[chat_id]
-                    from personal_profile import add_interest_to_profile, parse_items_with_priority
-                    items = parse_items_with_priority(text)
-                    if not items and text.strip():
-                        items = [{"name": text.strip(), "priority": "HIGH"}]
-                    added = []
-                    for it in items:
-                        ok, msg = add_interest_to_profile(it["name"], priority=it.get("priority", "HIGH"))
-                        if ok:
-                            added.append(f"• <b>{it['name']}</b> [{it.get('priority', 'HIGH')}]")
-                    if added:
-                        send_message(chat_id, f"✅ Profilingizga muvaffaqiyatli qo'shildi:\n" + "\n".join(added), {"inline_keyboard": [[{"text": "📋 Profilimni ko'rsat", "callback_data": "pt_view_profile"}]]}, parse_mode="HTML")
-                    else:
-                        send_message(chat_id, "Qiziqish qo'shilmadi.")
-                    continue
-
-                if pending and pending.get("type") == "awaiting_remove_interest":
-                    del pending_actions[chat_id]
-                    from personal_profile import remove_interest_from_profile
-                    names = [n.strip() for n in text.split(",") if n.strip()]
-                    removed = []
-                    not_found = []
-                    for name in names:
-                        if remove_interest_from_profile(name):
-                            removed.append(name)
+                    if "photo" in msg:
+                        print("Rasm keldi")
+                        file_id = msg["photo"][-1]["file_id"]
+                        local_path = await download_telegram_photo(file_id)
+                        if local_path:
+                            pending_actions[chat_id] = {
+                                "type": "update_profile_photo",
+                                "local_path": local_path,
+                            }
+                            confirm_keyboard = {
+                                "inline_keyboard": [[
+                                    {"text": "✅ Ha", "callback_data": "confirm_yes"},
+                                    {"text": "❌ Yo'q", "callback_data": "confirm_no"}
+                                ]]
+                            }
+                            send_message(
+                                chat_id,
+                                "Rasm qabul qilindi. Profil rasmingizni shu rasmga almashtirishni xohlaysizmi?",
+                                confirm_keyboard
+                            )
                         else:
-                            not_found.append(name)
-                    res_parts = []
-                    if removed:
-                        res_parts.append(f"✅ Profilingizdan olib tashlandi: <b>{', '.join(removed)}</b>")
-                    if not_found:
-                        res_parts.append(f"⚠️ Profilingizda topilmadi: {', '.join(not_found)}")
-                    send_message(chat_id, "\n\n".join(res_parts), {"inline_keyboard": [[{"text": "📋 Profilimni ko'rsat", "callback_data": "pt_view_profile"}]]}, parse_mode="HTML")
-                    continue
+                            send_message(chat_id, "Rasmni yuklab olishda xatolik yuz berdi.")
+                        continue
 
-                if "photo" in msg:
-                    print("Rasm keldi")
-                    file_id = msg["photo"][-1]["file_id"]
-                    local_path = await download_telegram_photo(file_id)
-                    if local_path:
-                        pending_actions[chat_id] = {
-                            "type": "update_profile_photo",
-                            "local_path": local_path,
-                        }
-                        confirm_keyboard = {
-                            "inline_keyboard": [[
-                                {"text": "✅ Ha", "callback_data": "confirm_yes"},
-                                {"text": "❌ Yo'q", "callback_data": "confirm_no"}
-                            ]]
-                        }
-                        send_message(
-                            chat_id,
-                            "Rasm qabul qilindi. Profil rasmingizni shu rasmga almashtirishni xohlaysizmi?",
-                            confirm_keyboard
-                        )
-                    else:
-                        send_message(chat_id, "Rasmni yuklab olishda xatolik yuz berdi.")
-                    continue
-
-                if text:
-                    print(f"Xabar keldi: {text}")
-                    ai_reply, keyboard = await get_ai_response(chat_id, text)
-                    send_message(chat_id, ai_reply, keyboard)
-                    print(f"Javob yuborildi: {ai_reply}")
+                    if text:
+                        print(f"Xabar keldi: {text}")
+                        ai_reply, keyboard = await get_ai_response(chat_id, text)
+                        send_message(chat_id, ai_reply, keyboard)
+                        print(f"Javob yuborildi: {ai_reply}")
+        
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -4203,7 +3281,6 @@ async def telethon_listener():
                 print(f"[TELETHON QAYTA ULANISH XATOSI]: {ce}")
 
 async def main():
-    from intelligence.monitor import intelligence_monitor_loop
     try:
         await telethon_client.start()
         me = await telethon_client.get_me()
@@ -4227,18 +3304,6 @@ async def main():
                 else:
                     update_owner_identity(new_name=detected_first_name)
 
-                try:
-                    from intelligence.config import load_user_profile, save_user_profile
-                    prof = load_user_profile()
-                    prof_name = prof.get("name", "")
-                    if prof_name in ["Orifxon", "Foydalanuvchi", "", None] and detected_first_name.lower() != "orifxon":
-                        prof["name"] = detected_first_name
-                        if prof_name == "Orifxon":
-                            prof["onboarding_completed"] = False
-                        save_user_profile(prof)
-                        print(f"[AUTH] profile.json foydalanuvchi nomi '{detected_first_name}'ga moslashtirildi!")
-                except Exception as pe:
-                    print("[AUTH] profile.json yangilashda xatolik:", pe)
     except Exception as e:
         print("[TELETHON BIRINCHI KIRISH XATOSI]:", e)
 
@@ -4246,8 +3311,7 @@ async def main():
         bot_polling_loop(),
         telethon_listener(),
         sync_contacts_periodically(),
-        check_and_send_conversation_reports(),
-        intelligence_monitor_loop(telethon_client, send_message, ADMIN_ID)
+        check_and_send_conversation_reports()
     )
 
 if __name__ == "__main__":
