@@ -39,6 +39,8 @@ if [ "$UPDATED" -eq 0 ]; then
     echo "📡 Repositoriyadan to'g'ridan-to'g'ri yangilanishlar yuklanmoqda: $REPO_URL ..."
     TMP_DIR=$(mktemp -d)
     if git clone --depth 1 "$REPO_URL" "$TMP_DIR" 2>/dev/null; then
+        cp -r "$TMP_DIR/toyona" . 2>/dev/null
+        cp "$TMP_DIR/toyona_manager.py" . 2>/dev/null
         cp "$TMP_DIR/bot.py" . 2>/dev/null
         cp "$TMP_DIR/requirements.txt" . 2>/dev/null
         cp "$TMP_DIR/setup.sh" . 2>/dev/null
@@ -100,12 +102,17 @@ else
     pip install --upgrade requests python-dotenv telethon rapidfuzz > /dev/null 2>&1
 fi
 
+if [ -d "toyona" ] && [ -f "toyona/package.json" ]; then
+    echo "📦 To‘yona Mini App kutubxonalari tekshirilmoqda..."
+    (cd toyona && npm install --silent > /dev/null 2>&1)
+fi
+
 # 6. Sintaksis va xavfsizlik tekshiruvi:
 echo "🔍 Kod tekshirilmoqda..."
-if python -m py_compile bot.py 2>/dev/null; then
+if python -m py_compile bot.py toyona_manager.py 2>/dev/null; then
     echo "✅ Sintaksis tekshiruvidan muvaffaqiyatli o'tdi!"
 else
-    echo "⚠️ Diqqat: bot.py faylida xatolik aniqlandi."
+    echo "⚠️ Diqqat: fayllarda xatolik aniqlandi."
 fi
 
 # Termux 'jarvis' buyrug'ini doim to'g'ri ishlashi uchun yangilab qo'yish:
@@ -115,8 +122,6 @@ if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
 cd "$CURRENT_DIR"
 if [ "\$1" = "update" ]; then
     bash update.sh
-elif [ "\$1" = "test" ]; then
-    python test_intelligence.py
 else
     python bot.py
 fi

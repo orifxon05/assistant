@@ -7,16 +7,20 @@ echo ""
 
 echo "1/4: Tizim paketlarini yangilash..."
 pkg update -y && pkg upgrade -y
-pkg install python git nano -y
-
+pkg install python git nano nodejs-lts -y
 
 echo ""
-echo "2/4: Python kutubxonalarini o'rnatish..."
+echo "2/4: Python va Node.js kutubxonalarini o'rnatish..."
 pip install --upgrade pip
 if [ -f "requirements.txt" ]; then
     pip install -r requirements.txt
 else
-    pip install requests python-dotenv telethon rapidfuzz
+    pip install requests python-dotenv telethon rapidfuzz psycopg2-binary
+fi
+
+if [ -d "toyona" ] && [ -f "toyona/package.json" ]; then
+    echo "📦 To‘yona Mini App kutubxonalari o'rnatilmoqda..."
+    (cd toyona && npm install --silent)
 fi
 
 echo ""
@@ -48,6 +52,8 @@ done
 read -p "Telegram API Hash (my.telegram.org): " API_HASH
 read -p "Ismingiz (masalan: Rustam) [standart: Telegram profilingizdan olinadi]: " OWNER_NAME
 OWNER_NAME=${OWNER_NAME:-Foydalanuvchi}
+read -p "To‘yona Neon Database URL (bo'sh qoldirsangiz keyin .env ga kiritishingiz mumkin): " TOYONA_DB_URL
+
 
 cat > .env << ENVEOF
 TELEGRAM_BOT_TOKEN=$BOT_TOKEN
@@ -57,6 +63,9 @@ TELEGRAM_API_HASH=$API_HASH
 ADMIN_ID=$ADMIN_ID
 OWNER_NAME=$OWNER_NAME
 SESSION_NAME=jarvis_session
+TOYONA_PORT=3000
+TOYONA_DATABASE_URL=$TOYONA_DB_URL
+TOYONA_WEBAPP_URL=
 ENVEOF
 
 echo ""

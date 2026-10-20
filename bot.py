@@ -327,6 +327,12 @@ def build_menu_keyboard():
     enabled = is_autoreply_enabled()
     mode = get_filter_mode()
     mode_label = {"all": "Hammaga", "only": "Faqat tanlanganlarga", "except": "Tanlanganlardan tashqari"}.get(mode, "Hammaga")
+    webapp_url = os.getenv("TOYONA_WEBAPP_URL", "").strip()
+    if webapp_url:
+        toyona_btn = [{"text": "💒 To‘yona hisobi (Mini App)", "web_app": {"url": webapp_url}}]
+    else:
+        toyona_btn = [{"text": "💒 To‘yona hisobi", "callback_data": "toyona_info"}]
+
     return {
         "inline_keyboard": [
             [
@@ -334,6 +340,7 @@ def build_menu_keyboard():
                 {"text": ("\u2705 " if enabled else "") + "\U0001f534 Men oflaynman", "callback_data": "set_offline"}
             ],
             [{"text": f"\U0001f3af Filtr: {mode_label}", "callback_data": "open_filter"}],
+            toyona_btn,
             [
                 {"text": "⚙️ Telegram sozlamalari", "callback_data": "open_tg_settings"}
             ],
@@ -2747,6 +2754,65 @@ async def handle_callback(callback_query):
         )
         return
 
+    if data == "toyona_info":
+        from toyona_manager import get_toyona_webapp_url
+        webapp_url = get_toyona_webapp_url()
+        port = os.getenv("TOYONA_PORT", "3000")
+        msg_text = (
+            "💒 <b>To‘yona Hisobi — Telegram Mini App</b>\n\n"
+            "Ushbu tizim orqali to‘ylar, oshnalar va to‘yona qarzlarini go‘sht ekvivalenti (kg) bo‘yicha aniq yuritishingiz mumkin.\n\n"
+            f"☁️ <b>Baza:</b> Neon.tech PostgreSQL (Bulutda faol)\n"
+            f"🔌 <b>Lokal port:</b> {port}\n"
+        )
+        if webapp_url:
+            msg_text += f"🌐 <b>Mini App manzili:</b> {webapp_url}\n\n"
+        else:
+            msg_text += (
+                "ℹ️ <i>Telegram ichida to‘g‘ridan-to‘g‘ri Mini App bo‘lib ochilishi uchun Cloudflare Tunnel manzilini .env faylida TOYONA_WEBAPP_URL qilib kiritishingiz mumkin.</i>\n\n"
+            )
+        msg_text += (
+            "📌 <b>Tezkor buyruqlar:</b>\n"
+            "• <code>/toyona</code> — Tizim holati\n"
+            "• <code>/toyona_backup</code> — Baza ma'lumotlarini fayl qilib Telegramga yuklab olish"
+        )
+        kb = {"inline_keyboard": []}
+        if webapp_url:
+            kb["inline_keyboard"].append([{"text": "🚀 Mini App’ni ochish", "web_app": {"url": webapp_url}}])
+        kb["inline_keyboard"].append([{"text": "💾 Zaxira nusxasini olish (Backup)", "callback_data": "toyona_do_backup"}])
+        kb["inline_keyboard"].append([{"text": "⬅️ Bosh menyu", "callback_data": "open_menu"}])
+        send_message(chat_id, msg_text, kb, parse_mode="HTML")
+        return
+
+    if data == "toyona_do_backup":
+        send_message(chat_id, "⏳ Neon bazasidan barcha to‘yona ma'lumotlari zaxiralanmoqda...")
+        from toyona_manager import export_toyona_data, send_file_to_telegram
+        from datetime import datetime
+        data_json, err = export_toyona_data()
+        if err:
+            send_message(chat_id, f"❌ Zaxira olishda xatolik yuz berdi:\n<code>{err}</code>", parse_mode="HTML")
+            return
+        
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        tmp_json = f"toyona_backup_{ts}.json"
+        with open(tmp_json, "w", encoding="utf-8") as f:
+            json.dump(data_json, f, ensure_ascii=False, indent=2)
+        
+        caption = (
+            f"✅ <b>To‘yona Bazasi To‘liq Zaxirasi</b>\n\n"
+            f"📅 <b>Vaqt:</b> {data_json.get('backup_date')}\n"
+            f"☁️ <b>Manba:</b> Neon.tech PostgreSQL\n"
+            f"👥 <b>Oshnalar:</b> {data_json['stats']['total_friends']} ta\n"
+            f"🎉 <b>To‘ylar:</b> {data_json['stats']['total_weddings']} ta\n"
+            f"🎁 <b>To‘yonalar:</b> {data_json['stats']['total_gifts']} ta\n\n"
+            f"<i>Ushbu JSON fayl orqali bazangizni istalgan payt 1 soniyada qayta tiklashingiz mumkin.</i>"
+        )
+        send_file_to_telegram(chat_id, tmp_json, caption=caption)
+        try:
+            os.remove(tmp_json)
+        except Exception:
+            pass
+        return
+
     if data == "set_online":
         set_autoreply(False)
         send_message(chat_id, "\U0001f7e2 Endi onlaynsiz. Xabarlarga o'zingiz javob berasiz.")
@@ -3187,6 +3253,57 @@ async def bot_polling_loop():
                         )
                         continue
 
+                    if cmd_word in ["/toyona", "toyona"]:
+                        from toyona_manager import get_toyona_webapp_url
+                        webapp_url = get_toyona_webapp_url()
+                        port = os.getenv("TOYONA_PORT", "3000")
+                        msg_text = (
+                            "💒 <b>To‘yona Hisobi — Telegram Mini App</b>\n\n"
+                            "Bu tizim orqali to‘ylar, oshnalar va to‘yona qarzlarini go‘sht ekvivalenti (kg) bo‘yicha aniq yuritishingiz mumkin.\n\n"
+                            f"☁️ <b>Baza:</b> Neon.tech PostgreSQL (Bulutda faol)\n"
+                            f"🔌 <b>Lokal port:</b> {port}\n"
+                            f"🌐 <b>Mini App manzili:</b> {webapp_url or 'O‘rnatilmagan'}\n\n"
+                            "📌 <b>Buyruqlar:</b>\n"
+                            "• <code>/toyona_backup</code> — Barcha to‘yona ma'lumotlarini fayl qilib Telegramga yuklab olish"
+                        )
+                        kb = {"inline_keyboard": []}
+                        if webapp_url:
+                            kb["inline_keyboard"].append([{"text": "🚀 Mini App’ni ochish", "web_app": {"url": webapp_url}}])
+                        kb["inline_keyboard"].append([{"text": "💾 Zaxira nusxasini olish (Backup)", "callback_data": "toyona_do_backup"}])
+                        kb["inline_keyboard"].append([{"text": "⬅️ Bosh menyu", "callback_data": "open_menu"}])
+                        send_message(chat_id, msg_text, kb, parse_mode="HTML")
+                        continue
+
+                    if cmd_word in ["/toyona_backup", "toyona_backup", "/backup"]:
+                        send_message(chat_id, "⏳ Neon bazasidan barcha to‘yona ma'lumotlari zaxiralanmoqda...")
+                        from toyona_manager import export_toyona_data, send_file_to_telegram
+                        from datetime import datetime
+                        data_json, err = export_toyona_data()
+                        if err:
+                            send_message(chat_id, f"❌ Zaxira olishda xatolik yuz berdi:\n<code>{err}</code>", parse_mode="HTML")
+                            continue
+                        
+                        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        tmp_json = f"toyona_backup_{ts}.json"
+                        with open(tmp_json, "w", encoding="utf-8") as f:
+                            json.dump(data_json, f, ensure_ascii=False, indent=2)
+                        
+                        caption = (
+                            f"✅ <b>To‘yona Bazasi To‘liq Zaxirasi</b>\n\n"
+                            f"📅 <b>Vaqt:</b> {data_json.get('backup_date')}\n"
+                            f"☁️ <b>Manba:</b> Neon.tech PostgreSQL\n"
+                            f"👥 <b>Oshnalar:</b> {data_json['stats']['total_friends']} ta\n"
+                            f"🎉 <b>To‘ylar:</b> {data_json['stats']['total_weddings']} ta\n"
+                            f"🎁 <b>To‘yonalar:</b> {data_json['stats']['total_gifts']} ta\n\n"
+                            f"<i>Ushbu JSON fayl orqali bazangizni istalgan payt 1 soniyada qayta tiklashingiz mumkin.</i>"
+                        )
+                        send_file_to_telegram(chat_id, tmp_json, caption=caption)
+                        try:
+                            os.remove(tmp_json)
+                        except Exception:
+                            pass
+                        continue
+
                     pending = pending_actions.get(chat_id)
                     if pending and pending.get("type") == "awaiting_filter_names":
                         mode = pending["mode"]
@@ -3306,6 +3423,13 @@ async def main():
 
     except Exception as e:
         print("[TELETHON BIRINCHI KIRISH XATOSI]:", e)
+
+    # Start Toyona server if present
+    try:
+        from toyona_manager import start_toyona_server
+        asyncio.create_task(start_toyona_server())
+    except Exception as te:
+        print("[TOYONA START ERROR]:", te)
 
     await asyncio.gather(
         bot_polling_loop(),

@@ -22,3 +22,17 @@ action_history.json
 *.tar.gz
 *.bak
 .update_backup/
+
+# Node.js & Mini App
+node_modules/
+toyona/node_modules/
+package-lock.json
+toyona/package-lock.json
+toyona_backup_*.json
+
+# Local scratch / test utilities
+upload_to_github.py
+get_contacts.py
+telethon_test.py
+
+

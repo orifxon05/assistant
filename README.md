@@ -19,6 +19,12 @@
 3. **🔄 Avtomatik Yangilanish (OTA):**
    - Kodlardagi yangilanishlarni GitHub orqali bot menyusidan bir tugma orqali yoki Termux terminalidan tortib olish.
 
+4. **💒 To‘yona Hisobi (Telegram Mini App):**
+   - To‘ylar, oshnalar va to‘yona qarzlarini go‘sht ekvivalenti (kg) bo‘yicha aniq hisoblash.
+   - Bulutli **Neon PostgreSQL** bazasiga ulangan — telefon alishsa yoki format bo‘lsa ham barcha hisoblar saqlanib qoladi.
+   - Termux ichida `jarvis` ishga tushganda Mini App serveri ham lokal ishga tushadi (30-50 soniyalik kutish yoki uxlab qolishlar yo‘q).
+   - `/toyona_backup` buyrug‘i bilan istalgan vaqtda barcha ma'lumotlarni JSON fayl ko‘rinishida Telegramga yuklab olib, zaxiraga saqlash mumkin.
+
 ---
 
 ## 🚀 O'rnatish (Termux - Android)
@@ -33,12 +39,23 @@ cd jarvis
 ```bash
 bash setup.sh
 ```
-*Skript barcha kerakli paketlarni o'rnatadi, sizdan Bot Token, Groq API, API ID/Hash va Ismingizni so'rab `.env` faylini avtomatik yaratadi.*
+*Skript barcha kerakli paketlarni (Python, Node.js) o'rnatadi, sizdan kerakli kalitlarni so'rab `.env` faylini avtomatik yaratadi.*
 
 ### 3. Botni ishga tushirish:
 ```bash
 jarvis
 ```
+
+---
+
+## 🌐 Mini App’ni Telegramga ulash (Cloudflare Tunnel)
+
+Mini App Telegram ichida chiroyli oynada ochilishi uchun bepul HTTPS tunnel ishlatiladi:
+```bash
+pkg install cloudflared
+cloudflared tunnel --url http://localhost:3000
+```
+Chiqqan `https://....trycloudflare.com` manzilini `.env` fayliga `TOYONA_WEBAPP_URL` sifatida qo‘shing yoki BotFather orqali Menu Button qilib sozlang.
 
 ---
 
@@ -56,8 +73,11 @@ bash update.sh
 
 ## 📌 Foydali Buyruqlar
 
-* `jarvis` — Botni ishga tushirish
+* `jarvis` — Bot va To‘yona serverini ishga tushirish
 * `jarvis update` — GitHub'dan yangilanishlarni olish
 * `/menu` — Telegramda boshqaruv menyusini ochish
+* `/toyona` — To‘yona hisobi Mini App holati va menyusi
+* `/toyona_backup` — Neon bazasidagi to‘yona ma'lumotlarini JSON fayl qilib Telegramga jo‘natish
 * `/version` — Versiya va tizim holatini tekshirish
 * `/update` — Tizimni yangilash
+
