@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "toyona/server.js",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["toyona/public/**"]
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "toyona/server.js"
+    }
+  ]
+}

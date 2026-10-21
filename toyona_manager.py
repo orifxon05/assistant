@@ -22,7 +22,8 @@ def get_toyona_db_url():
 
 def get_toyona_webapp_url():
     global active_tunnel_url
-    return active_tunnel_url or os.getenv("TOYONA_WEBAPP_URL", "").strip()
+    custom_url = os.getenv("TOYONA_WEBAPP_URL", "").strip()
+    return custom_url or active_tunnel_url
 
 def is_node_available():
     try:
@@ -91,6 +92,12 @@ def notify_admin_tunnel(url):
 
 async def start_cloudflared_tunnel(port):
     global cloudflared_process, active_tunnel_url
+    custom_url = os.getenv("TOYONA_WEBAPP_URL", "").strip()
+    if custom_url:
+        print(f"[TOYONA] Doimiy havola aniqlandi: {custom_url}. Cloudflare tunnel kerak emas.")
+        notify_admin_tunnel(custom_url)
+        return
+
     if not is_cloudflared_available():
         print("[TOYONA] cloudflared o'rnatilmagan. Mini App faqat lokal tarmoqda ishlaydi.")
         return

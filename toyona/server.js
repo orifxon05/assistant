@@ -336,9 +336,9 @@ app.get('/api/export.csv', asyncHandler(async (req, res) => {
 
 app.post('/api/send-telegram-report', asyncHandler(async (req, res) => {
   const owner = req.user.id;
-  const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN || '8703043493:AAFIFYQa4SpjW4Nz8OYdVwnVBIqkjJbz7eo';
   if (!botToken) {
-    return res.status(400).json({ error: 'Telegram Bot Token sozlanmagan (.env faylini tekshiring).' });
+    return res.status(400).json({ error: 'Telegram Bot Token sozlanmagan.' });
   }
 
   const [settings, friends, weddings, gifts] = await Promise.all([
@@ -428,9 +428,16 @@ app.post('/api/send-telegram-report', asyncHandler(async (req, res) => {
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 const port = Number(process.env.TOYONA_PORT || process.env.PORT || 3000);
-app.listen(port, '0.0.0.0', () => {
-  console.log(`[TOYONA] Express server ${port}-portda faol (http://0.0.0.0:${port})`);
-  initDb().then(() => console.log('[TOYONA] Baza jadvallari tekshirildi va tayyor.'))
-    .catch(err => console.error('[TOYONA DB XATO]:', err.message));
-});
+if (!process.env.VERCEL && !process.env.NOW_REGION) {
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`[TOYONA] Express server ${port}-portda faol (http://0.0.0.0:${port})`);
+    initDb().then(() => console.log('[TOYONA] Baza jadvallari tekshirildi va tayyor.'))
+      .catch(err => console.error('[TOYONA DB XATO]:', err.message));
+  });
+} else {
+  initDb().catch(err => console.error('[TOYONA DB INIT ERROR]:', err.message));
+}
+
+module.exports = app;
+
 
