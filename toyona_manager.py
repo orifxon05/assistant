@@ -8,6 +8,8 @@ from datetime import datetime
 
 TOYONA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "toyona")
 toyona_process = None
+cloudflared_process = None
+active_tunnel_url = ""
 
 def get_toyona_db_url():
     raw = os.getenv("TOYONA_DATABASE_URL") or os.getenv("DATABASE_URL") or ""
@@ -16,7 +18,8 @@ def get_toyona_db_url():
     return raw.strip()
 
 def get_toyona_webapp_url():
-    return os.getenv("TOYONA_WEBAPP_URL", "").strip()
+    global active_tunnel_url
+    return active_tunnel_url or os.getenv("TOYONA_WEBAPP_URL", "").strip()
 
 def is_node_available():
     try:
@@ -24,6 +27,79 @@ def is_node_available():
         return res.returncode == 0
     except Exception:
         return False
+
+def is_cloudflared_available():
+    try:
+        res = subprocess.run(["cloudflared", "-v"], capture_output=True, text=True, timeout=3)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+def notify_admin_tunnel(url):
+    admin_id = os.getenv("ADMIN_ID")
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not admin_id or not bot_token:
+        return
+    text = (
+        "💒 <b>To‘yona Mini App muvaffaqiyatli ishga tushdi!</b>\n\n"
+        f"🌐 <b>Faol havola:</b> <code>{url}</code>\n\n"
+        "<i>Quyidagi tugma orqali ilovani to‘g‘ridan-to‘g‘ri ochishingiz mumkin:</i>"
+    )
+    kb = {
+        "inline_keyboard": [
+            [{"text": "🚀 Mini App’ni ochish", "web_app": {"url": url}}]
+        ]
+    }
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={
+                "chat_id": admin_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "reply_markup": kb
+            },
+            timeout=10
+        )
+    except Exception as e:
+        print(f"[TOYONA NOTIFY ERROR]: {e}")
+
+async def start_cloudflared_tunnel(port):
+    global cloudflared_process, active_tunnel_url
+    if not is_cloudflared_available():
+        print("[TOYONA] cloudflared o'rnatilmagan. Mini App faqat lokal tarmoqda ishlaydi.")
+        return
+
+    cmd = ["cloudflared", "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{port}"]
+    print(f"[TOYONA TUNNEL] Cloudflare tunnel ishga tushirilmoqda...")
+    try:
+        cloudflared_process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        async def monitor_stream(stream):
+            global active_tunnel_url
+            import re
+            pattern = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                line_str = line.decode('utf-8', errors='ignore')
+                m = pattern.search(line_str)
+                if m:
+                    url = m.group(0)
+                    if url != active_tunnel_url:
+                        active_tunnel_url = url
+                        print(f"\n[TOYONA TUNNEL] 🎉 Mini App havolasi tayyor: {active_tunnel_url}\n")
+                        notify_admin_tunnel(active_tunnel_url)
+
+        asyncio.create_task(monitor_stream(cloudflared_process.stderr))
+        asyncio.create_task(monitor_stream(cloudflared_process.stdout))
+    except Exception as e:
+        print(f"[TOYONA TUNNEL XATOLIK]: {e}")
 
 async def start_toyona_server():
     global toyona_process
@@ -45,7 +121,7 @@ async def start_toyona_server():
         port = os.getenv("TOYONA_PORT", "3000")
         env["TOYONA_PORT"] = port
 
-        print(f"[TOYONA] Server ishga tushirilmoqda (port {port})...")
+        print(f"[TOYONA] Node.js server ishga tushirilmoqda (port {port})...")
         toyona_process = await asyncio.create_subprocess_exec(
             "node", server_js,
             cwd=TOYONA_DIR,
@@ -54,18 +130,30 @@ async def start_toyona_server():
             stderr=asyncio.subprocess.PIPE
         )
         print(f"[TOYONA] Node.js server ishga tushdi (PID: {toyona_process.pid})")
+
+        # Start auto-tunnel if cloudflared is installed
+        asyncio.create_task(start_cloudflared_tunnel(port))
+
     except Exception as e:
         print(f"[TOYONA XATOLIK]: Serverni yoqishda xatolik: {e}")
 
 async def stop_toyona_server():
-    global toyona_process
+    global toyona_process, cloudflared_process
+    if cloudflared_process:
+        try:
+            cloudflared_process.terminate()
+            await cloudflared_process.wait()
+            print("[TOYONA] Cloudflared tunnel to'xtatildi.")
+        except Exception:
+            pass
     if toyona_process:
         try:
             toyona_process.terminate()
             await toyona_process.wait()
-            print("[TOYONA] Server to'xtatildi.")
+            print("[TOYONA] Node.js server to'xtatildi.")
         except Exception:
             pass
+
 
 def export_toyona_data():
     conn_str = get_toyona_db_url()
