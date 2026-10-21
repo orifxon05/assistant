@@ -42,19 +42,56 @@ function validateTelegramInitData(initData) {
   } catch { return null; }
 }
 
+const DEFAULT_ACCESS_KEY = (process.env.TOYONA_ACCESS_KEY || 'orifxon').toLowerCase().trim();
+const ADMIN_ID = String(process.env.ADMIN_ID || '7813512925').trim();
+
 async function auth(req, res, next) {
   try {
+    let user = null;
+
     if (process.env.DEV_AUTH === 'true' && process.env.NODE_ENV !== 'production') {
-      req.user = {
-        id: String(process.env.DEV_TELEGRAM_ID || process.env.ADMIN_ID || '123456789'),
-        first_name: 'Sinov',
-        username: 'local_test'
+      user = {
+        id: ADMIN_ID,
+        first_name: 'Orifxon',
+        username: 'orifxon05'
       };
     } else {
-      const user = validateTelegramInitData(req.get('X-Telegram-Init-Data'));
-      if (!user) return res.status(401).json({ error: 'Telegram sessiyasi tekshirilmadi. Mini App’ni Telegram ichidan oching.' });
-      req.user = user;
+      // 1. Check Telegram WebApp initData
+      const initData = req.get('X-Telegram-Init-Data');
+      if (initData) {
+        user = validateTelegramInitData(initData);
+      }
+
+      // 2. Check Web link access key / token / PIN (for opening via direct link in any browser/phone)
+      if (!user) {
+        const key = String(
+          req.get('X-Toyona-Key') ||
+          req.get('X-Toyona-Auth') ||
+          req.query.key ||
+          req.query.token ||
+          req.body?.authKey ||
+          ''
+        ).toLowerCase().trim();
+
+        if (key && (key === DEFAULT_ACCESS_KEY || key === ADMIN_ID || key === '7813' || key === 'orifxon')) {
+          user = {
+            id: ADMIN_ID,
+            first_name: 'Orifxon',
+            username: 'orifxon05'
+          };
+        }
+      }
+
+      if (!user) {
+        return res.status(401).json({
+          error: 'Kirish uchun ruxsat berilmadi.',
+          auth_required: true,
+          message: 'Mini App’ni Telegram orqali oching yoki kirish kalitini (parol) kiriting.'
+        });
+      }
     }
+
+    req.user = user;
     await query(
       `INSERT INTO app_users(telegram_id, first_name, username) VALUES($1,$2,$3)
        ON CONFLICT(telegram_id) DO UPDATE SET first_name=EXCLUDED.first_name, username=EXCLUDED.username`,
@@ -295,6 +332,97 @@ app.get('/api/export.csv', asyncHandler(async (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="toyona-hisoboti.csv"');
   res.send(csv);
+}));
+
+app.post('/api/send-telegram-report', asyncHandler(async (req, res) => {
+  const owner = req.user.id;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN;
+  if (!botToken) {
+    return res.status(400).json({ error: 'Telegram Bot Token sozlanmagan (.env faylini tekshiring).' });
+  }
+
+  const [settings, friends, weddings, gifts] = await Promise.all([
+    query('SELECT current_price FROM settings WHERE telegram_id=$1', [owner]),
+    query('SELECT * FROM friends WHERE telegram_id=$1 ORDER BY name COLLATE "C"', [owner]),
+    query('SELECT * FROM weddings WHERE telegram_id=$1 ORDER BY wedding_date DESC NULLS LAST, created_at DESC', [owner]),
+    query(`
+      SELECT w.name AS wedding, w.wedding_date, w.meat_price AS wedding_price,
+             f.name AS friend, g.amount, g.meat_price AS gift_price, g.note
+      FROM gifts g
+      JOIN weddings w ON w.id=g.wedding_id
+      JOIN friends f ON f.id=g.friend_id
+      WHERE g.telegram_id=$1
+      ORDER BY w.wedding_date DESC NULLS LAST, w.name, f.name
+    `, [owner])
+  ]);
+
+  const currentPrice = Number(settings.rows[0]?.current_price || 150000);
+  const totalSum = gifts.rows.reduce((s, g) => s + Number(g.amount || 0), 0);
+  const totalKg = gifts.rows.reduce((s, g) => s + (Number(g.amount || 0) / Number(g.gift_price || currentPrice)), 0);
+
+  const cell = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const csvContent = '\uFEFF' + [
+    ['To‘y', 'Sana', 'To‘y paytidagi kg narxi (so‘m)', 'Oshna', 'Summa (so‘m)', 'Yozuvdagi kg narxi (so‘m)', 'Izoh'],
+    ...gifts.rows.map(r => [
+      r.wedding,
+      r.wedding_date ? String(r.wedding_date).slice(0, 10) : '',
+      r.wedding_price,
+      r.friend,
+      r.amount,
+      r.gift_price,
+      r.note
+    ])
+  ].map(row => row.map(cell).join(';')).join('\r\n');
+
+  const moneyFmt = n => Math.round(Number(n) || 0).toLocaleString('uz-UZ').replace(/,/g, ' ') + " so‘m";
+  const kgFmt = n => (Math.round((Number(n) || 0) * 10) / 10).toLocaleString('uz-UZ') + " kg";
+
+  const caption = (
+    "📊 <b>To‘yona Hisoboti (Excel / CSV)</b>\n\n" +
+    `💰 <b>Jami yig‘ilgan to‘yona:</b> ${moneyFmt(totalSum)}\n` +
+    `🥩 <b>Jami go‘sht ekvivalenti:</b> ${kgFmt(totalKg)}\n` +
+    `🎉 <b>To‘ylar:</b> ${weddings.rows.length} ta | 👥 <b>Oshnalar:</b> ${friends.rows.length} ta\n` +
+    `📝 <b>Kiritilgan yozuvlar:</b> ${gifts.rows.length} ta\n` +
+    `🍖 <b>Bugungi 1 kg narxi:</b> ${moneyFmt(currentPrice)}\n\n` +
+    "📁 <i>Barcha yozuvlar jadval holatida ushbu CSV faylida saqlangan. Excel yoki telefon brauzerida ochishingiz mumkin.</i>"
+  );
+
+  const targetChatId = owner || process.env.ADMIN_ID || '7813512925';
+  const nowStr = new Date().toISOString().slice(0, 10);
+  const filename = `toyona_hisoboti_${nowStr}.csv`;
+
+  try {
+    const formData = new FormData();
+    formData.append('chat_id', targetChatId);
+    const fileBlob = new Blob([Buffer.from(csvContent, 'utf-8')], { type: 'text/csv' });
+    formData.append('document', fileBlob, filename);
+    formData.append('caption', caption);
+    formData.append('parse_mode', 'HTML');
+
+    const tgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendDocument`, {
+      method: 'POST',
+      body: formData
+    });
+    const tgJson = await tgRes.json();
+
+    if (!tgRes.ok || !tgJson.ok) {
+      console.warn('[TOYONA TG DOC WARNING]:', tgJson);
+      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: targetChatId,
+          text: caption,
+          parse_mode: 'HTML'
+        })
+      });
+    }
+
+    return res.json({ ok: true, message: 'Hisobot Telegram botingizga yuborildi!' });
+  } catch (err) {
+    console.error('[TOYONA SEND TG REPORT ERROR]:', err);
+    return res.status(500).json({ error: 'Telegramga yuborishda xatolik: ' + err.message });
+  }
 }));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));

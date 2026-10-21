@@ -2759,12 +2759,16 @@ async def handle_callback(callback_query):
         webapp_url = get_toyona_webapp_url()
         kb = {"inline_keyboard": []}
         if webapp_url:
+            direct_url = f"{webapp_url}?key=orifxon"
             msg_text = (
                 "💒 <b>To‘yona Mini App</b>\n\n"
-                f"🌐 <b>Faol havola:</b> <code>{webapp_url}</code>\n\n"
-                "<i>Quyidagi tugma orqali ilovani to‘g‘ridan-to‘g‘ri ochishingiz mumkin:</i>"
+                f"📱 <b>Telegram Mini App:</b> pastdagi tugmani bosing\n"
+                f"🌐 <b>Har qanday telefon/brauzer uchun havola:</b>\n"
+                f"<code>{direct_url}</code>\n\n"
+                "<i>(Ushbu havolani istalgan telefonda Chrome yoki Safari orqali ochishingiz mumkin, Telegram shart emas!)</i>"
             )
-            kb["inline_keyboard"].append([{"text": "🚀 Mini App’ni ochish", "web_app": {"url": webapp_url}}])
+            kb["inline_keyboard"].append([{"text": "🚀 Mini App’ni ochish (Telegramda)", "web_app": {"url": webapp_url}}])
+            kb["inline_keyboard"].append([{"text": "🌐 Brauzerda ochish (Har qanday telefon)", "url": direct_url}])
         else:
             msg_text = (
                 "💒 <b>To‘yona Mini App</b>\n\n"
@@ -2772,9 +2776,18 @@ async def handle_callback(callback_query):
             )
             kb["inline_keyboard"].append([{"text": "🔄 Qayta tekshirish", "callback_data": "toyona_info"}])
 
+        kb["inline_keyboard"].append([{"text": "📊 Hisobotni olish (Excel/CSV)", "callback_data": "toyona_get_report"}])
         kb["inline_keyboard"].append([{"text": "💾 Zaxira nusxasini olish (Backup)", "callback_data": "toyona_do_backup"}])
         kb["inline_keyboard"].append([{"text": "⬅️ Bosh menyu", "callback_data": "open_menu"}])
         send_message(chat_id, msg_text, kb, parse_mode="HTML")
+        return
+
+    if data == "toyona_get_report":
+        send_message(chat_id, "⏳ To‘yona hisoboti tayyorlanmoqda va Excel/CSV fayl shaklida yuborilmoqda...")
+        from toyona_manager import generate_and_send_toyona_report
+        ok, err = generate_and_send_toyona_report(chat_id)
+        if not ok:
+            send_message(chat_id, f"❌ Hisobot yuborishda xatolik yuz berdi: {err}")
         return
 
     if data == "toyona_do_backup":
@@ -3252,12 +3265,16 @@ async def bot_polling_loop():
                         webapp_url = get_toyona_webapp_url()
                         kb = {"inline_keyboard": []}
                         if webapp_url:
+                            direct_url = f"{webapp_url}?key=orifxon"
                             msg_text = (
                                 "💒 <b>To‘yona Mini App</b>\n\n"
-                                f"🌐 <b>Faol havola:</b> <code>{webapp_url}</code>\n\n"
-                                "<i>Quyidagi tugma orqali ilovani to‘g‘ridan-to‘g‘ri ochishingiz mumkin:</i>"
+                                f"📱 <b>Telegram Mini App:</b> pastdagi tugmani bosing\n"
+                                f"🌐 <b>Har qanday telefon/brauzer uchun havola:</b>\n"
+                                f"<code>{direct_url}</code>\n\n"
+                                "<i>(Ushbu havolani istalgan telefonda Chrome yoki Safari orqali ochishingiz mumkin, Telegram shart emas!)</i>"
                             )
-                            kb["inline_keyboard"].append([{"text": "🚀 Mini App’ni ochish", "web_app": {"url": webapp_url}}])
+                            kb["inline_keyboard"].append([{"text": "🚀 Mini App’ni ochish (Telegramda)", "web_app": {"url": webapp_url}}])
+                            kb["inline_keyboard"].append([{"text": "🌐 Brauzerda ochish (Har qanday telefon)", "url": direct_url}])
                         else:
                             msg_text = (
                                 "💒 <b>To‘yona Mini App</b>\n\n"
@@ -3265,9 +3282,18 @@ async def bot_polling_loop():
                             )
                             kb["inline_keyboard"].append([{"text": "🔄 Qayta tekshirish", "callback_data": "toyona_info"}])
 
+                        kb["inline_keyboard"].append([{"text": "📊 Hisobotni olish (Excel/CSV)", "callback_data": "toyona_get_report"}])
                         kb["inline_keyboard"].append([{"text": "💾 Zaxira nusxasini olish (Backup)", "callback_data": "toyona_do_backup"}])
                         kb["inline_keyboard"].append([{"text": "⬅️ Bosh menyu", "callback_data": "open_menu"}])
                         send_message(chat_id, msg_text, kb, parse_mode="HTML")
+                        continue
+
+                    if cmd_word in ["/toyona_report", "toyona_report", "/hisobot"]:
+                        send_message(chat_id, "⏳ To‘yona hisoboti tayyorlanmoqda va Excel/CSV fayl shaklida yuborilmoqda...")
+                        from toyona_manager import generate_and_send_toyona_report
+                        ok, err = generate_and_send_toyona_report(chat_id)
+                        if not ok:
+                            send_message(chat_id, f"❌ Hisobot yuborishda xatolik yuz berdi: {err}")
                         continue
 
                     if cmd_word in ["/toyona_backup", "toyona_backup", "/backup"]:

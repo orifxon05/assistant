@@ -43,14 +43,19 @@ def notify_admin_tunnel(url):
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not admin_id or not bot_token:
         return
+    direct_url = f"{url}?key=orifxon"
     text = (
         "💒 <b>To‘yona Mini App muvaffaqiyatli ishga tushdi!</b>\n\n"
-        f"🌐 <b>Faol havola:</b> <code>{url}</code>\n\n"
-        "<i>Quyidagi tugma orqali ilovani to‘g‘ridan-to‘g‘ri ochishingiz mumkin:</i>"
+        f"📱 <b>Telegram Mini App:</b> pastdagi tugmani bosing\n"
+        f"🌐 <b>Har qanday telefon/brauzer uchun to‘g‘ridan-to‘g‘ri havola:</b>\n"
+        f"<code>{direct_url}</code>\n\n"
+        "<i>(Ushbu havolani istalgan telefonda Chrome yoki Safari orqali ochishingiz mumkin, Telegram shart emas!)</i>"
     )
     kb = {
         "inline_keyboard": [
-            [{"text": "🚀 Mini App’ni ochish", "web_app": {"url": url}}]
+            [{"text": "🚀 Mini App’ni ochish (Telegramda)", "web_app": {"url": url}}],
+            [{"text": "🌐 Brauzerda ochish (Har qanday telefon)", "url": direct_url}],
+            [{"text": "📊 Hisobotni yuklab olish (CSV/Excel)", "callback_data": "toyona_get_report"}]
         ]
     }
     try:
@@ -309,3 +314,61 @@ def send_file_to_telegram(chat_id, file_path, caption="", bot_token=None):
     except Exception as e:
         print(f"[TOYONA SEND FILE ERROR]: {e}")
         return False
+
+
+def generate_and_send_toyona_report(chat_id):
+    data, err = export_toyona_data()
+    if err or not data:
+        return False, err or "Ma'lumot topilmadi"
+
+    friends_map = {f["id"]: f["name"] for f in data.get("friends", [])}
+    weddings_map = {w["id"]: w for w in data.get("weddings", [])}
+    gifts = data.get("gifts", [])
+
+    total_amount = sum(g.get("amount", 0) for g in gifts)
+    total_kg = sum(g.get("amount", 0) / (g.get("meat_price", 0) or 150000) for g in gifts)
+
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    csv_file = f"toyona_hisoboti_{ts}.csv"
+
+    def escape_csv(val):
+        s = str(val if val is not None else "")
+        return '"' + s.replace('"', '""') + '"'
+
+    rows = [
+        ["To‘y", "Sana", "To‘y paytidagi kg narxi (so‘m)", "Oshna", "Summa (so‘m)", "Yozuvdagi kg narxi (so‘m)", "Izoh"]
+    ]
+
+    for g in gifts:
+        w = weddings_map.get(g.get("wedding_id"), {})
+        w_name = w.get("name", "Noma'lum to'y")
+        w_date = (w.get("wedding_date") or "")[:10]
+        w_price = w.get("meat_price", "")
+        f_name = friends_map.get(g.get("friend_id"), "Noma'lum oshna")
+        rows.append([w_name, w_date, w_price, f_name, g.get("amount", 0), g.get("meat_price", ""), g.get("note", "")])
+
+    with open(csv_file, "w", encoding="utf-8-sig") as f:
+        for r in rows:
+            f.write(";".join(escape_csv(x) for x in r) + "\n")
+
+    money_fmt = f"{int(total_amount):,}".replace(",", " ") + " so‘m"
+    kg_fmt = f"{total_kg:.1f} kg"
+
+    caption = (
+        "📊 <b>To‘yona Hisoboti (Excel / CSV)</b>\n\n"
+        f"💰 <b>Jami yig‘ilgan to‘yona:</b> {money_fmt}\n"
+        f"🥩 <b>Jami go‘sht ekvivalenti:</b> {kg_fmt}\n"
+        f"🎉 <b>To‘ylar soni:</b> {len(weddings_map)} ta | 👥 <b>Oshnalar:</b> {len(friends_map)} ta\n"
+        f"📝 <b>Yozuvlar:</b> {len(gifts)} ta\n\n"
+        "📁 <i>To‘liq jadval fayli ilova qilindi. Excel yoki telefon brauzerida ochishingiz mumkin.</i>"
+    )
+
+    ok = send_file_to_telegram(chat_id, csv_file, caption=caption)
+    try:
+        if os.path.exists(csv_file):
+            os.remove(csv_file)
+    except Exception:
+        pass
+
+    return ok, None
+
