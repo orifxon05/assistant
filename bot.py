@@ -3420,6 +3420,12 @@ async def main():
     except Exception as e:
         print("[TELETHON BIRINCHI KIRISH XATOSI]:", e)
 
+    # Termux fon rejimida uxlab qolmasligi uchun wake-lock olish
+    try:
+        subprocess.run(["termux-wake-lock"], capture_output=True, timeout=2)
+    except Exception:
+        pass
+
     # Start Toyona server if present
     try:
         from toyona_manager import start_toyona_server

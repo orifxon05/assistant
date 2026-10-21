@@ -79,6 +79,7 @@ CURRENT_DIR=$(pwd)
 
 cat > "$RUNNER_PATH" << 'RUNNEREOF'
 #!/data/data/com.termux/files/usr/bin/bash
+termux-wake-lock 2>/dev/null
 CURRENT_DIR="__DIR__"
 cd "$CURRENT_DIR"
 

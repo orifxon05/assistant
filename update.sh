@@ -119,6 +119,7 @@ fi
 if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
     cat > "$PREFIX/bin/jarvis" << RUNNEREOF
 #!/data/data/com.termux/files/usr/bin/bash
+termux-wake-lock 2>/dev/null
 cd "$CURRENT_DIR"
 if [ "\$1" = "update" ]; then
     bash update.sh
