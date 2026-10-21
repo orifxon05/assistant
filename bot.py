@@ -2757,27 +2757,21 @@ async def handle_callback(callback_query):
     if data == "toyona_info":
         from toyona_manager import get_toyona_webapp_url
         webapp_url = get_toyona_webapp_url()
-        port = os.getenv("TOYONA_PORT", "3000")
-        msg_text = (
-            "💒 <b>To‘yona Hisobi — Telegram Mini App</b>\n\n"
-            "Ushbu tizim orqali to‘ylar, oshnalar va to‘yona qarzlarini go‘sht ekvivalenti (kg) bo‘yicha aniq yuritishingiz mumkin.\n\n"
-            f"☁️ <b>Baza:</b> Neon.tech PostgreSQL (Bulutda faol)\n"
-            f"🔌 <b>Lokal port:</b> {port}\n"
-        )
-        if webapp_url:
-            msg_text += f"🌐 <b>Mini App manzili:</b> {webapp_url}\n\n"
-        else:
-            msg_text += (
-                "ℹ️ <i>Telegram ichida to‘g‘ridan-to‘g‘ri Mini App bo‘lib ochilishi uchun Cloudflare Tunnel manzilini .env faylida TOYONA_WEBAPP_URL qilib kiritishingiz mumkin.</i>\n\n"
-            )
-        msg_text += (
-            "📌 <b>Tezkor buyruqlar:</b>\n"
-            "• <code>/toyona</code> — Tizim holati\n"
-            "• <code>/toyona_backup</code> — Baza ma'lumotlarini fayl qilib Telegramga yuklab olish"
-        )
         kb = {"inline_keyboard": []}
         if webapp_url:
+            msg_text = (
+                "💒 <b>To‘yona Mini App</b>\n\n"
+                f"🌐 <b>Faol havola:</b> <code>{webapp_url}</code>\n\n"
+                "<i>Quyidagi tugma orqali ilovani to‘g‘ridan-to‘g‘ri ochishingiz mumkin:</i>"
+            )
             kb["inline_keyboard"].append([{"text": "🚀 Mini App’ni ochish", "web_app": {"url": webapp_url}}])
+        else:
+            msg_text = (
+                "💒 <b>To‘yona Mini App</b>\n\n"
+                "⏳ <i>Cloudflare tunnel ulanmoqda, iltimos bir necha soniya kuting...</i>"
+            )
+            kb["inline_keyboard"].append([{"text": "🔄 Qayta tekshirish", "callback_data": "toyona_info"}])
+
         kb["inline_keyboard"].append([{"text": "💾 Zaxira nusxasini olish (Backup)", "callback_data": "toyona_do_backup"}])
         kb["inline_keyboard"].append([{"text": "⬅️ Bosh menyu", "callback_data": "open_menu"}])
         send_message(chat_id, msg_text, kb, parse_mode="HTML")
@@ -3256,19 +3250,21 @@ async def bot_polling_loop():
                     if cmd_word in ["/toyona", "toyona"]:
                         from toyona_manager import get_toyona_webapp_url
                         webapp_url = get_toyona_webapp_url()
-                        port = os.getenv("TOYONA_PORT", "3000")
-                        msg_text = (
-                            "💒 <b>To‘yona Hisobi — Telegram Mini App</b>\n\n"
-                            "Bu tizim orqali to‘ylar, oshnalar va to‘yona qarzlarini go‘sht ekvivalenti (kg) bo‘yicha aniq yuritishingiz mumkin.\n\n"
-                            f"☁️ <b>Baza:</b> Neon.tech PostgreSQL (Bulutda faol)\n"
-                            f"🔌 <b>Lokal port:</b> {port}\n"
-                            f"🌐 <b>Mini App manzili:</b> {webapp_url or 'O‘rnatilmagan'}\n\n"
-                            "📌 <b>Buyruqlar:</b>\n"
-                            "• <code>/toyona_backup</code> — Barcha to‘yona ma'lumotlarini fayl qilib Telegramga yuklab olish"
-                        )
                         kb = {"inline_keyboard": []}
                         if webapp_url:
+                            msg_text = (
+                                "💒 <b>To‘yona Mini App</b>\n\n"
+                                f"🌐 <b>Faol havola:</b> <code>{webapp_url}</code>\n\n"
+                                "<i>Quyidagi tugma orqali ilovani to‘g‘ridan-to‘g‘ri ochishingiz mumkin:</i>"
+                            )
                             kb["inline_keyboard"].append([{"text": "🚀 Mini App’ni ochish", "web_app": {"url": webapp_url}}])
+                        else:
+                            msg_text = (
+                                "💒 <b>To‘yona Mini App</b>\n\n"
+                                "⏳ <i>Cloudflare tunnel ulanmoqda, iltimos bir necha soniya kuting...</i>"
+                            )
+                            kb["inline_keyboard"].append([{"text": "🔄 Qayta tekshirish", "callback_data": "toyona_info"}])
+
                         kb["inline_keyboard"].append([{"text": "💾 Zaxira nusxasini olish (Backup)", "callback_data": "toyona_do_backup"}])
                         kb["inline_keyboard"].append([{"text": "⬅️ Bosh menyu", "callback_data": "open_menu"}])
                         send_message(chat_id, msg_text, kb, parse_mode="HTML")

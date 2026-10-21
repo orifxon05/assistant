@@ -64,13 +64,30 @@ def notify_admin_tunnel(url):
     except Exception as e:
         print(f"[TOYONA NOTIFY ERROR]: {e}")
 
+    try:
+        # Telegram pastki chap burchagidagi Menyu tugmasini ham yangilab qo'yish
+        requests.post(
+            f"https://api.telegram.org/bot{bot_token}/setChatMenuButton",
+            json={
+                "menu_button": {
+                    "type": "web_app",
+                    "text": "💒 To‘yona",
+                    "web_app": {"url": url}
+                }
+            },
+            timeout=10
+        )
+    except Exception:
+        pass
+
+
 async def start_cloudflared_tunnel(port):
     global cloudflared_process, active_tunnel_url
     if not is_cloudflared_available():
         print("[TOYONA] cloudflared o'rnatilmagan. Mini App faqat lokal tarmoqda ishlaydi.")
         return
 
-    cmd = ["cloudflared", "tunnel", "--protocol", "http2", "--url", f"http://127.0.0.1:{port}"]
+    cmd = ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{port}"]
     print(f"[TOYONA TUNNEL] Cloudflare tunnel ishga tushirilmoqda...")
     try:
         cloudflared_process = await asyncio.create_subprocess_exec(
