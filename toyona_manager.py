@@ -11,11 +11,14 @@ toyona_process = None
 cloudflared_process = None
 active_tunnel_url = ""
 
+DEFAULT_NEON_DB_URL = "postgresql://neondb_owner:npg_RNsvIktC3pF2@ep-curly-math-b5sqz5zy-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require"
+
 def get_toyona_db_url():
-    raw = os.getenv("TOYONA_DATABASE_URL") or os.getenv("DATABASE_URL") or ""
+    raw = os.getenv("TOYONA_DATABASE_URL") or os.getenv("DATABASE_URL") or DEFAULT_NEON_DB_URL
     if "channel_binding=" in raw:
         raw = raw.replace("channel_binding=require&", "").replace("&channel_binding=require", "").replace("?channel_binding=require", "")
     return raw.strip()
+
 
 def get_toyona_webapp_url():
     global active_tunnel_url
@@ -177,14 +180,13 @@ async def start_toyona_server():
             print("[TOYONA] Kutubxonalar muvaffaqiyatli o'rnatildi.")
 
         env = os.environ.copy()
-        if not env.get("TOYONA_DATABASE_URL"):
-            env["TOYONA_DATABASE_URL"] = get_toyona_db_url()
-        if not env.get("TELEGRAM_BOT_TOKEN"):
-            env["TELEGRAM_BOT_TOKEN"] = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        env["TOYONA_DATABASE_URL"] = get_toyona_db_url()
+        env["TELEGRAM_BOT_TOKEN"] = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
         port = os.getenv("TOYONA_PORT", "3000")
         env["TOYONA_PORT"] = port
         is_server_running = True
+        print(f"[TOYONA] Baza sozlandi: {env['TOYONA_DATABASE_URL'][:30]}...")
 
         asyncio.create_task(run_node_supervisor(env, port))
         asyncio.create_task(start_cloudflared_tunnel(port))

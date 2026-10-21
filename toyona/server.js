@@ -63,8 +63,8 @@ async function auth(req, res, next) {
     await query(`INSERT INTO settings(telegram_id) VALUES($1) ON CONFLICT(telegram_id) DO NOTHING`, [req.user.id]);
     next();
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Serverda vaqtinchalik xatolik.' });
+    console.error('[TOYONA AUTH XATO]:', e);
+    res.status(500).json({ error: 'Baza bilan ulanishda xatolik: ' + (e.message || String(e)) });
   }
 }
 app.use('/api', auth);

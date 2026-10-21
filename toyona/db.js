@@ -1,6 +1,10 @@
 const { Pool } = require('pg');
 
-let rawConn = process.env.TOYONA_DATABASE_URL || process.env.DATABASE_URL || '';
+const DEFAULT_NEON_DB_URL = 'postgresql://neondb_owner:npg_RNsvIktC3pF2@ep-curly-math-b5sqz5zy-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require';
+let rawConn = (process.env.TOYONA_DATABASE_URL || process.env.DATABASE_URL || '').trim();
+if (!rawConn) {
+  rawConn = DEFAULT_NEON_DB_URL;
+}
 // Strip channel_binding if present to prevent node-postgres SASL mismatches
 if (rawConn.includes('channel_binding=')) {
   rawConn = rawConn.replace(/[?&]channel_binding=[^&]+/, '');
