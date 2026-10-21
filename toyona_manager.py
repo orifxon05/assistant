@@ -118,8 +118,47 @@ async def start_cloudflared_tunnel(port):
     except Exception as e:
         print(f"[TOYONA TUNNEL XATOLIK]: {e}")
 
+is_server_running = True
+
+async def run_node_supervisor(env, port):
+    global toyona_process, is_server_running
+    server_js = os.path.join(TOYONA_DIR, "server.js")
+    while is_server_running:
+        try:
+            print(f"[TOYONA] Node.js server ishga tushirilmoqda (port {port})...")
+            toyona_process = await asyncio.create_subprocess_exec(
+                "node", server_js,
+                cwd=TOYONA_DIR,
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            print(f"[TOYONA] Node.js server ishga tushdi (PID: {toyona_process.pid})")
+
+            async def monitor_node_output(stream, is_err=False):
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    txt = line.decode('utf-8', errors='ignore').rstrip()
+                    if txt:
+                        prefix = "[TOYONA ERR]" if is_err else "[TOYONA]"
+                        print(f"{prefix} {txt}")
+
+            asyncio.create_task(monitor_node_output(toyona_process.stdout, False))
+            asyncio.create_task(monitor_node_output(toyona_process.stderr, True))
+
+            await toyona_process.wait()
+            if not is_server_running:
+                break
+            print(f"[TOYONA] Node server to'xtadi. 2 soniyada qayta ishga tushirilmoqda...")
+            await asyncio.sleep(2)
+        except Exception as e:
+            print(f"[TOYONA SUPERVISOR XATO]: {e}")
+            await asyncio.sleep(3)
+
 async def start_toyona_server():
-    global toyona_process
+    global is_server_running
     server_js = os.path.join(TOYONA_DIR, "server.js")
     if not os.path.exists(server_js):
         return
@@ -145,38 +184,17 @@ async def start_toyona_server():
 
         port = os.getenv("TOYONA_PORT", "3000")
         env["TOYONA_PORT"] = port
+        is_server_running = True
 
-        print(f"[TOYONA] Node.js server ishga tushirilmoqda (port {port})...")
-        toyona_process = await asyncio.create_subprocess_exec(
-            "node", server_js,
-            cwd=TOYONA_DIR,
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        print(f"[TOYONA] Node.js server ishga tushdi (PID: {toyona_process.pid})")
-
-        async def monitor_node_output(stream, is_err=False):
-            while True:
-                line = await stream.readline()
-                if not line:
-                    break
-                txt = line.decode('utf-8', errors='ignore').rstrip()
-                if txt:
-                    prefix = "[TOYONA ERR]" if is_err else "[TOYONA]"
-                    print(f"{prefix} {txt}")
-
-        asyncio.create_task(monitor_node_output(toyona_process.stdout, False))
-        asyncio.create_task(monitor_node_output(toyona_process.stderr, True))
-
-        # Start auto-tunnel if cloudflared is installed
+        asyncio.create_task(run_node_supervisor(env, port))
         asyncio.create_task(start_cloudflared_tunnel(port))
 
     except Exception as e:
         print(f"[TOYONA XATOLIK]: Serverni yoqishda xatolik: {e}")
 
 async def stop_toyona_server():
-    global toyona_process, cloudflared_process
+    global toyona_process, cloudflared_process, is_server_running
+    is_server_running = False
     if cloudflared_process:
         try:
             cloudflared_process.terminate()
@@ -191,6 +209,7 @@ async def stop_toyona_server():
             print("[TOYONA] Node.js server to'xtatildi.")
         except Exception:
             pass
+
 
 
 def export_toyona_data():

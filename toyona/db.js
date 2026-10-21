@@ -16,11 +16,29 @@ const pool = new Pool({
   connectionString: rawConn,
   ssl: isSsl ? { rejectUnauthorized: false } : false,
   max: 10,
-  idleTimeoutMillis: 30000
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+  allowExitOnIdle: false
 });
 
-async function query(text, params) {
-  return pool.query(text, params);
+// Neon serverless idle socket error handler to prevent crashing process
+pool.on('error', (err) => {
+  console.warn('[TOYONA POOL NON-FATAL ERROR]:', err.message);
+});
+
+async function query(text, params, retries = 2) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await pool.query(text, params);
+    } catch (err) {
+      if (attempt < retries) {
+        console.warn(`[TOYONA DB RETRY] ${err.message}. Qayta ulanmoqda (${attempt}/${retries})...`);
+        await new Promise(r => setTimeout(r, 400));
+      } else {
+        throw err;
+      }
+    }
+  }
 }
 
 async function initDb() {

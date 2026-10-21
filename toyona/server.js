@@ -69,9 +69,25 @@ async function auth(req, res, next) {
 }
 app.use('/api', auth);
 
+process.on('uncaughtException', (err) => {
+  console.error('[TOYONA UNCAUGHT EXCEPTION]:', err.message || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[TOYONA UNHANDLED REJECTION]:', reason);
+});
+
+const asyncHandler = fn => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(err => {
+    console.error(`[API XATO ${req.method} ${req.originalUrl}]:`, err.message || err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message || 'Serverda xatolik yuz berdi.' });
+    }
+  });
+};
+
 const own = (table, id, owner) => query(`SELECT * FROM ${table} WHERE id=$1 AND telegram_id=$2`, [id, owner]);
 
-app.get('/api/bootstrap', async (req, res) => {
+app.get('/api/bootstrap', asyncHandler(async (req, res) => {
   const owner = req.user.id;
   const [settings, friends, weddings, gifts] = await Promise.all([
     query('SELECT current_price FROM settings WHERE telegram_id=$1', [owner]),
@@ -86,39 +102,43 @@ app.get('/api/bootstrap', async (req, res) => {
     weddings: weddings.rows.map(w => ({...w, meat_price: Number(w.meat_price), min_kg: Number(w.min_kg)})),
     gifts: gifts.rows.map(g => ({...g, amount: Number(g.amount), meat_price: Number(g.meat_price)}))
   });
-});
+}));
 
-app.put('/api/settings', async (req, res) => {
+app.put('/api/settings', asyncHandler(async (req, res) => {
   const price = Number(req.body.currentPrice);
   if (!Number.isSafeInteger(price) || price < 1) return res.status(400).json({ error: 'Narx musbat butun son bo‘lishi kerak.' });
   await query('UPDATE settings SET current_price=$1, updated_at=NOW() WHERE telegram_id=$2', [price, req.user.id]);
   res.json({ ok: true });
-});
+}));
 
-app.post('/api/friends', async (req, res) => {
+app.post('/api/friends', asyncHandler(async (req, res) => {
   const name = String(req.body.name || '').trim();
   if (!name || name.length > 100) return res.status(400).json({ error: 'Ism 1–100 belgi bo‘lishi kerak.' });
   const id = randomUUID();
   await query('INSERT INTO friends(id, telegram_id, name) VALUES($1,$2,$3)', [id, req.user.id, name]);
   res.status(201).json({ id, name });
-});
-app.put('/api/friends/:id', async (req, res) => {
+}));
+
+app.put('/api/friends/:id', asyncHandler(async (req, res) => {
   const name = String(req.body.name || '').trim();
   if (!name || name.length > 100) return res.status(400).json({ error: 'Ism 1–100 belgi bo‘lishi kerak.' });
   const result = await query('UPDATE friends SET name=$1 WHERE id=$2 AND telegram_id=$3 RETURNING *', [name, req.params.id, req.user.id]);
   if (!result.rowCount) return res.status(404).json({ error: 'Oshna topilmadi.' });
   res.json(result.rows[0]);
-});
-app.delete('/api/friends/:id', async (req, res) => {
+}));
+
+app.delete('/api/friends/:id', asyncHandler(async (req, res) => {
   const result = await query('DELETE FROM friends WHERE id=$1 AND telegram_id=$2 RETURNING id', [req.params.id, req.user.id]);
   if (!result.rowCount) return res.status(404).json({ error: 'Oshna topilmadi.' });
   res.json({ ok: true });
-});
+}));
 
-app.post('/api/weddings', async (req, res) => {
-  const friendId = String(req.body.friendId || '');
+app.post('/api/weddings', asyncHandler(async (req, res) => {
+  const rawFriend = req.body.friendId;
+  const friendId = (rawFriend && typeof rawFriend === 'string' && rawFriend.trim().length > 10) ? rawFriend.trim() : null;
   const name = String(req.body.name || '').trim();
-  const date = req.body.date ? String(req.body.date) : null;
+  const rawDate = req.body.date ? String(req.body.date).trim() : null;
+  const date = (rawDate && rawDate !== 'null' && rawDate !== 'undefined') ? rawDate : null;
   const price = Number(req.body.meatPrice);
   const minKg = Number(req.body.minKg ?? 2);
   const note = String(req.body.note || '').trim().slice(0, 500);
@@ -132,16 +152,19 @@ app.post('/api/weddings', async (req, res) => {
   const id = randomUUID();
   await query(
     'INSERT INTO weddings(id,telegram_id,friend_id,name,wedding_date,meat_price,min_kg,note) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
-    [id, req.user.id, friendId || null, name, date, price, minKg, note]
+    [id, req.user.id, friendId, name, date, price, minKg, note]
   );
   res.status(201).json({ id });
-});
-app.put('/api/weddings/:id', async (req, res) => {
+}));
+
+app.put('/api/weddings/:id', asyncHandler(async (req, res) => {
+  const rawFriend = req.body.friendId;
+  const friendId = (rawFriend && typeof rawFriend === 'string' && rawFriend.trim().length > 10) ? rawFriend.trim() : null;
   const name = String(req.body.name || '').trim();
-  const date = req.body.date || null;
+  const rawDate = req.body.date ? String(req.body.date).trim() : null;
+  const date = (rawDate && rawDate !== 'null' && rawDate !== 'undefined') ? rawDate : null;
   const price = Number(req.body.meatPrice);
   const minKg = Number(req.body.minKg);
-  const friendId = req.body.friendId || null;
   const note = String(req.body.note || '').trim().slice(0, 500);
   if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isFinite(minKg) || minKg < 0 || minKg > 100) return res.status(400).json({ error: 'Maydonlarni tekshiring.' });
   const result = await query(
@@ -151,18 +174,23 @@ app.put('/api/weddings/:id', async (req, res) => {
   );
   if (!result.rowCount) return res.status(404).json({ error: 'To‘y topilmadi.' });
   res.json({ ok: true });
-});
-app.delete('/api/weddings/:id', async (req, res) => {
+}));
+
+app.delete('/api/weddings/:id', asyncHandler(async (req, res) => {
   const result = await query('DELETE FROM weddings WHERE id=$1 AND telegram_id=$2 RETURNING id', [req.params.id, req.user.id]);
   if (!result.rowCount) return res.status(404).json({ error: 'To‘y topilmadi.' });
   res.json({ ok: true });
-});
+}));
 
-app.put('/api/gifts', async (req, res) => {
-  const weddingId = String(req.body.weddingId || '');
-  const friendId = String(req.body.friendId || '');
+
+app.put('/api/gifts', asyncHandler(async (req, res) => {
+  const weddingId = String(req.body.weddingId || '').trim();
+  const friendId = String(req.body.friendId || '').trim();
   const amount = Number(req.body.amount);
   const note = String(req.body.note || '').trim().slice(0, 500);
+  if (!weddingId || !friendId || weddingId.length < 10 || friendId.length < 10) {
+    return res.status(400).json({ error: 'To‘y yoki oshna ma’lumotlari to‘liq emas.' });
+  }
   if (!Number.isSafeInteger(amount) || amount < 0) return res.status(400).json({ error: 'Summa 0 yoki musbat butun son bo‘lishi kerak.' });
   const wedding = await query('SELECT meat_price FROM weddings WHERE id=$1 AND telegram_id=$2', [weddingId, req.user.id]);
   const friend = await query('SELECT id FROM friends WHERE id=$1 AND telegram_id=$2', [friendId, req.user.id]);
@@ -180,9 +208,9 @@ app.put('/api/gifts', async (req, res) => {
     [id, req.user.id, weddingId, friendId, amount, Number(wedding.rows[0].meat_price), note]
   );
   res.json({ ok: true });
-});
+}));
 
-app.get('/api/backup', async (req, res) => {
+app.get('/api/backup', asyncHandler(async (req, res) => {
   const owner = req.user.id;
   const [settings, friends, weddings, gifts] = await Promise.all([
     query('SELECT * FROM settings WHERE telegram_id=$1', [owner]),
@@ -198,62 +226,57 @@ app.get('/api/backup', async (req, res) => {
     weddings: weddings.rows,
     gifts: gifts.rows
   });
-});
+}));
 
-app.post('/api/restore', async (req, res) => {
+app.post('/api/restore', asyncHandler(async (req, res) => {
   const owner = req.user.id;
   const { settings, friends, weddings, gifts } = req.body || {};
-  try {
-    if (settings && settings.current_price) {
-      await query(
-        `INSERT INTO settings(telegram_id, current_price, updated_at) VALUES($1,$2,NOW())
-         ON CONFLICT(telegram_id) DO UPDATE SET current_price=EXCLUDED.current_price, updated_at=NOW()`,
-        [owner, Number(settings.current_price)]
-      );
-    }
-    if (Array.isArray(friends)) {
-      for (const f of friends) {
-        if (f.id && f.name) {
-          await query(
-            `INSERT INTO friends(id, telegram_id, name) VALUES($1,$2,$3)
-             ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name`,
-            [f.id, owner, f.name]
-          );
-        }
-      }
-    }
-    if (Array.isArray(weddings)) {
-      for (const w of weddings) {
-        if (w.id && w.name) {
-          await query(
-            `INSERT INTO weddings(id, telegram_id, friend_id, name, wedding_date, meat_price, min_kg, note)
-             VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-             ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, wedding_date=EXCLUDED.wedding_date, meat_price=EXCLUDED.meat_price, min_kg=EXCLUDED.min_kg, friend_id=EXCLUDED.friend_id, note=EXCLUDED.note`,
-            [w.id, owner, w.friend_id || null, w.name, w.wedding_date || null, Number(w.meat_price), Number(w.min_kg || 2), w.note || '']
-          );
-        }
-      }
-    }
-    if (Array.isArray(gifts)) {
-      for (const g of gifts) {
-        if (g.wedding_id && g.friend_id && g.amount) {
-          await query(
-            `INSERT INTO gifts(id, telegram_id, wedding_id, friend_id, amount, meat_price, note)
-             VALUES($1,$2,$3,$4,$5,$6,$7)
-             ON CONFLICT(wedding_id, friend_id) DO UPDATE SET amount=EXCLUDED.amount, meat_price=EXCLUDED.meat_price, note=EXCLUDED.note`,
-            [g.id || randomUUID(), owner, g.wedding_id, g.friend_id, Number(g.amount), Number(g.meat_price), g.note || '']
-          );
-        }
-      }
-    }
-    res.json({ ok: true, message: 'Baza muvaffaqiyatli tiklandi.' });
-  } catch (err) {
-    console.error('Restore error:', err);
-    res.status(500).json({ error: 'Qayta tiklashda xatolik yuz berdi.' });
+  if (settings && settings.current_price) {
+    await query(
+      `INSERT INTO settings(telegram_id, current_price, updated_at) VALUES($1,$2,NOW())
+       ON CONFLICT(telegram_id) DO UPDATE SET current_price=EXCLUDED.current_price, updated_at=NOW()`,
+      [owner, Number(settings.current_price)]
+    );
   }
-});
+  if (Array.isArray(friends)) {
+    for (const f of friends) {
+      if (f.id && f.name) {
+        await query(
+          `INSERT INTO friends(id, telegram_id, name) VALUES($1,$2,$3)
+           ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name`,
+          [f.id, owner, f.name]
+        );
+      }
+    }
+  }
+  if (Array.isArray(weddings)) {
+    for (const w of weddings) {
+      if (w.id && w.name) {
+        await query(
+          `INSERT INTO weddings(id, telegram_id, friend_id, name, wedding_date, meat_price, min_kg, note)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, wedding_date=EXCLUDED.wedding_date, meat_price=EXCLUDED.meat_price, min_kg=EXCLUDED.min_kg, friend_id=EXCLUDED.friend_id, note=EXCLUDED.note`,
+          [w.id, owner, w.friend_id || null, w.name, w.wedding_date || null, Number(w.meat_price), Number(w.min_kg || 2), w.note || '']
+        );
+      }
+    }
+  }
+  if (Array.isArray(gifts)) {
+    for (const g of gifts) {
+      if (g.wedding_id && g.friend_id && g.amount) {
+        await query(
+          `INSERT INTO gifts(id, telegram_id, wedding_id, friend_id, amount, meat_price, note)
+           VALUES($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT(wedding_id, friend_id) DO UPDATE SET amount=EXCLUDED.amount, meat_price=EXCLUDED.meat_price, note=EXCLUDED.note`,
+          [g.id || randomUUID(), owner, g.wedding_id, g.friend_id, Number(g.amount), Number(g.meat_price), g.note || '']
+        );
+      }
+    }
+  }
+  res.json({ ok: true, message: 'Baza muvaffaqiyatli tiklandi.' });
+}));
 
-app.get('/api/export.csv', async (req, res) => {
+app.get('/api/export.csv', asyncHandler(async (req, res) => {
   const owner = req.user.id;
   const rows = await query(`
     SELECT w.name AS wedding, w.wedding_date, w.meat_price AS wedding_price,
@@ -272,7 +295,7 @@ app.get('/api/export.csv', async (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="toyona-hisoboti.csv"');
   res.send(csv);
-});
+}));
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
