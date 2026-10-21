@@ -20,9 +20,11 @@ def get_toyona_db_url():
     return raw.strip()
 
 
+DEFAULT_VERCEL_WEBAPP_URL = "https://assistant-nu-nine.vercel.app"
+
 def get_toyona_webapp_url():
     global active_tunnel_url
-    custom_url = os.getenv("TOYONA_WEBAPP_URL", "").strip()
+    custom_url = os.getenv("TOYONA_WEBAPP_URL", "").strip() or DEFAULT_VERCEL_WEBAPP_URL
     return custom_url or active_tunnel_url
 
 def is_node_available():
@@ -92,9 +94,10 @@ def notify_admin_tunnel(url):
 
 async def start_cloudflared_tunnel(port):
     global cloudflared_process, active_tunnel_url
-    custom_url = os.getenv("TOYONA_WEBAPP_URL", "").strip()
+    custom_url = os.getenv("TOYONA_WEBAPP_URL", "").strip() or DEFAULT_VERCEL_WEBAPP_URL
     if custom_url:
-        print(f"[TOYONA] Doimiy havola aniqlandi: {custom_url}. Cloudflare tunnel kerak emas.")
+        print(f"[TOYONA] Doimiy Vercel havolasi aniqlandi: {custom_url}. Cloudflare tunnel kerak emas.")
+        active_tunnel_url = custom_url
         notify_admin_tunnel(custom_url)
         return
 
