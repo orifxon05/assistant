@@ -1,9 +1,11 @@
-require('dotenv').config();
+const path = require('path');
+try { require('dotenv').config({ path: path.join(__dirname, '..', '.env') }); } catch (e) {}
+try { require('dotenv').config(); } catch (e) {}
 const express = require('express');
 const crypto = require('crypto');
 const { randomUUID } = require('crypto');
-const path = require('path');
 const { query, initDb } = require('./db');
+
 
 const app = express();
 app.use(express.json({ limit: '5mb' }));
@@ -275,5 +277,9 @@ app.get('/api/export.csv', async (req, res) => {
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 const port = Number(process.env.TOYONA_PORT || process.env.PORT || 3000);
-initDb().then(() => app.listen(port, () => console.log(`To‘yona server ${port}-portda ishga tushdi`)))
-  .catch(err => { console.error('Database initialization failed:', err); process.exit(1); });
+app.listen(port, '0.0.0.0', () => {
+  console.log(`[TOYONA] Express server ${port}-portda faol (http://0.0.0.0:${port})`);
+  initDb().then(() => console.log('[TOYONA] Baza jadvallari tekshirildi va tayyor.'))
+    .catch(err => console.error('[TOYONA DB XATO]:', err.message));
+});
+

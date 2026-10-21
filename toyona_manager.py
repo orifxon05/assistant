@@ -129,6 +129,14 @@ async def start_toyona_server():
         return
 
     try:
+        # Check node_modules
+        node_modules = os.path.join(TOYONA_DIR, "node_modules")
+        if not os.path.exists(node_modules):
+            print("[TOYONA] 'node_modules' topilmadi. Kutubxonalar o'rnatilmoqda (npm install)...")
+            npm_proc = await asyncio.create_subprocess_exec("npm", "install", "--omit=dev", cwd=TOYONA_DIR)
+            await npm_proc.wait()
+            print("[TOYONA] Kutubxonalar muvaffaqiyatli o'rnatildi.")
+
         env = os.environ.copy()
         if not env.get("TOYONA_DATABASE_URL"):
             env["TOYONA_DATABASE_URL"] = get_toyona_db_url()
@@ -147,6 +155,19 @@ async def start_toyona_server():
             stderr=asyncio.subprocess.PIPE
         )
         print(f"[TOYONA] Node.js server ishga tushdi (PID: {toyona_process.pid})")
+
+        async def monitor_node_output(stream, is_err=False):
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                txt = line.decode('utf-8', errors='ignore').rstrip()
+                if txt:
+                    prefix = "[TOYONA ERR]" if is_err else "[TOYONA]"
+                    print(f"{prefix} {txt}")
+
+        asyncio.create_task(monitor_node_output(toyona_process.stdout, False))
+        asyncio.create_task(monitor_node_output(toyona_process.stderr, True))
 
         # Start auto-tunnel if cloudflared is installed
         asyncio.create_task(start_cloudflared_tunnel(port))
