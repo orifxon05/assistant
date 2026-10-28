@@ -313,25 +313,229 @@ app.post('/api/restore', asyncHandler(async (req, res) => {
   res.json({ ok: true, message: 'Baza muvaffaqiyatli tiklandi.' });
 }));
 
-app.get('/api/export.csv', asyncHandler(async (req, res) => {
-  const owner = req.user.id;
-  const rows = await query(`
-    SELECT w.name AS wedding, w.wedding_date, w.meat_price AS wedding_price,
-           f.name AS friend, g.amount, g.meat_price AS gift_price, g.note
-    FROM gifts g
-    JOIN weddings w ON w.id=g.wedding_id
-    JOIN friends f ON f.id=g.friend_id
-    WHERE g.telegram_id=$1
-    ORDER BY w.wedding_date DESC NULLS LAST, w.name, f.name
-  `, [owner]);
+function buildToyonaReport(settings, friends, weddings, gifts) {
+  const currentPrice = Number(settings.rows[0]?.current_price || 150000);
+  const moneyFmt = n => Math.round(Number(n) || 0).toLocaleString('uz-UZ').replace(/,/g, ' ') + ' so‘m';
+  const kgFmt = n => (Math.round((Number(n) || 0) * 10) / 10).toLocaleString('uz-UZ') + ' kg';
+  const dateFmt = d => d ? new Date(String(d).slice(0, 10) + 'T12:00:00').toLocaleDateString('uz-UZ', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+
+  let totalSum = 0;
+  let totalKg = 0;
+  let totalTodayValue = 0;
+
+  const rowsData = gifts.rows.map((r, idx) => {
+    const amount = Number(r.amount || 0);
+    const meatPriceAtGift = Number(r.gift_price || r.wedding_price || currentPrice);
+    const kg = meatPriceAtGift > 0 ? (amount / meatPriceAtGift) : 0;
+    const todayVal = Math.round(kg * currentPrice);
+
+    totalSum += amount;
+    totalKg += kg;
+    totalTodayValue += todayVal;
+
+    return {
+      num: idx + 1,
+      friend: r.friend || 'Noma‘lum',
+      wedding: r.wedding ? (r.wedding + ' to‘yi') : '-',
+      date: dateFmt(r.wedding_date),
+      amount,
+      amountFmt: moneyFmt(amount),
+      kg,
+      kgFmt: kgFmt(kg),
+      todayVal,
+      todayValFmt: moneyFmt(todayVal),
+      note: r.note || '-'
+    };
+  });
+
+  const weddingMap = {};
+  for (const w of weddings.rows) {
+    weddingMap[w.id] = {
+      name: w.name ? (w.name + ' to‘yi') : '-',
+      date: dateFmt(w.wedding_date),
+      count: 0,
+      sum: 0,
+      kg: 0
+    };
+  }
+  for (const g of gifts.rows) {
+    if (weddingMap[g.wedding_id]) {
+      const a = Number(g.amount || 0);
+      const p = Number(g.gift_price || g.wedding_price || currentPrice);
+      const k = p > 0 ? (a / p) : 0;
+      weddingMap[g.wedding_id].count++;
+      weddingMap[g.wedding_id].sum += a;
+      weddingMap[g.wedding_id].kg += k;
+    }
+  }
+  const weddingSummary = Object.values(weddingMap).sort((a, b) => b.sum - a.sum);
+
+  const todayDateStr = new Date().toLocaleDateString('uz-UZ', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const giftRowsHtml = rowsData.length ? rowsData.map(r => `
+    <tr>
+      <td style="text-align:center;">${r.num}</td>
+      <td><b>${r.friend}</b></td>
+      <td>${r.wedding}</td>
+      <td style="text-align:center;">${r.date}</td>
+      <td style="text-align:right;">${r.amountFmt}</td>
+      <td style="text-align:right;">${r.kgFmt}</td>
+      <td style="text-align:right;">${r.todayValFmt}</td>
+      <td>${r.note}</td>
+    </tr>
+  `).join('') : `<tr><td colspan="8" style="text-align:center;color:#888;padding:15px;">To‘yona yozuvlari kiritilmagan</td></tr>`;
+
+  const weddingRowsHtml = weddingSummary.length ? weddingSummary.map((w, idx) => `
+    <tr>
+      <td style="text-align:center;">${idx + 1}</td>
+      <td><b>${w.name}</b></td>
+      <td style="text-align:center;">${w.date}</td>
+      <td style="text-align:center;">${w.count} kishi</td>
+      <td style="text-align:right;">${moneyFmt(w.sum)}</td>
+      <td style="text-align:right;">${kgFmt(w.kg)}</td>
+    </tr>
+  `).join('') : `<tr><td colspan="6" style="text-align:center;color:#888;padding:15px;">To‘ylar mavjud emas</td></tr>`;
+
+  const excelHtml = `\uFEFF<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<!--[if gte mso 9]>
+<xml>
+ <x:ExcelWorkbook>
+  <x:ExcelWorksheets>
+   <x:ExcelWorksheet>
+    <x:Name>Toyona hisoboti</x:Name>
+    <x:WorksheetOptions>
+     <x:DisplayGridlines/>
+    </x:WorksheetOptions>
+   </x:ExcelWorksheet>
+  </x:ExcelWorksheets>
+ </x:ExcelWorkbook>
+</xml>
+<![endif]-->
+<style>
+  body { font-family: Calibri, 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #1e2924; }
+  table { border-collapse: collapse; margin-bottom: 22px; width: 100%; }
+  th { background-color: #0d785b; color: #ffffff; font-weight: bold; border: 1px solid #084c39; padding: 8px 10px; font-size: 11pt; }
+  td { border: 1px solid #d3ded8; padding: 7px 10px; font-size: 10.5pt; }
+  .head-sec { background-color: #164e3f; color: #ffffff; font-size: 12pt; font-weight: bold; padding: 7px 10px; }
+  .total-row { background-color: #e5f4ed; font-weight: bold; color: #084c39; }
+  .summary-lbl { background-color: #f6faf8; font-weight: 600; width: 280px; }
+  .summary-val { font-weight: bold; color: #0d785b; }
+</style>
+</head>
+<body>
+  <h2 style="color:#0d785b;margin:0 0 4px;font-size:16pt;">💒 TO‘YONA HISOBOTI</h2>
+  <p style="margin:0 0 16px;color:#556;font-size:10pt;">Tayyorlangan sana: <b>${todayDateStr}</b> | Bugungi 1 kg go‘sht narxi: <b>${moneyFmt(currentPrice)}</b></p>
+
+  <table>
+    <tr><th colspan="2" class="head-sec">📊 1. UMUMIY KO‘RSATKICHLAR</th></tr>
+    <tr><td class="summary-lbl">Jami yig‘ilgan to‘yona summasi:</td><td class="summary-val">${moneyFmt(totalSum)}</td></tr>
+    <tr><td class="summary-lbl">Jami go‘sht ekvivalenti:</td><td class="summary-val">${kgFmt(totalKg)}</td></tr>
+    <tr><td class="summary-lbl">Bugungi narxdagi umumiy qiymati:</td><td class="summary-val">${moneyFmt(totalTodayValue)}</td></tr>
+    <tr><td class="summary-lbl">Jami to‘ylar soni:</td><td>${weddings.rows.length} ta</td></tr>
+    <tr><td class="summary-lbl">Jami oshnalar soni:</td><td>${friends.rows.length} ta</td></tr>
+    <tr><td class="summary-lbl">Kiritilgan to‘yona yozuvlari:</td><td>${gifts.rows.length} ta</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="8" class="head-sec">📋 2. BARCHA TO‘YONALARNING BATAFSIL RO‘YXATI</th></tr>
+    <tr>
+      <th style="width:45px;text-align:center;">№</th>
+      <th style="text-align:left;">Oshna (Do‘st ismi)</th>
+      <th style="text-align:left;">Qaysi to‘y</th>
+      <th style="text-align:center;">To‘y sanasi</th>
+      <th style="text-align:right;">Berilgan to‘yona</th>
+      <th style="text-align:right;">Go‘sht miqdori</th>
+      <th style="text-align:right;">Bugungi qiymati</th>
+      <th style="text-align:left;">Izoh</th>
+    </tr>
+    ${giftRowsHtml}
+    <tr class="total-row">
+      <td colspan="4" style="text-align:right;">JAMI:</td>
+      <td style="text-align:right;">${moneyFmt(totalSum)}</td>
+      <td style="text-align:right;">${kgFmt(totalKg)}</td>
+      <td style="text-align:right;">${moneyFmt(totalTodayValue)}</td>
+      <td></td>
+    </tr>
+  </table>
+
+  <table>
+    <tr><th colspan="6" class="head-sec">🎉 3. TO‘YLAR BO‘YICHA JAMLANMA</th></tr>
+    <tr>
+      <th style="width:45px;text-align:center;">№</th>
+      <th style="text-align:left;">To‘y nomi</th>
+      <th style="text-align:center;">Sanasi</th>
+      <th style="text-align:center;">To‘yona berganlar</th>
+      <th style="text-align:right;">Jami summa</th>
+      <th style="text-align:right;">Jami go‘sht ekv.</th>
+    </tr>
+    ${weddingRowsHtml}
+  </table>
+</body>
+</html>`;
+
   const cell = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const csv = '\uFEFF' + [
-    ['To‘y', 'Sana', 'To‘y paytidagi kg narxi', 'Oshna', 'Summa (so‘m)', 'Yozuvdagi kg narxi', 'Izoh'],
-    ...rows.rows.map(r => [r.wedding, r.wedding_date ? String(r.wedding_date).slice(0,10) : '', r.wedding_price, r.friend, r.amount, r.gift_price, r.note])
-  ].map(row => row.map(cell).join(';')).join('\r\n');
+  const csvLines = [
+    ['№', 'Oshna (Do‘st ismi)', 'Qaysi to‘y', 'To‘y sanasi', 'Berilgan to‘yona (so‘m)', 'Go‘sht miqdori (kg)', 'Bugungi qiymati (so‘m)', 'Izoh'],
+    ...rowsData.map(r => [
+      r.num,
+      r.friend,
+      r.wedding,
+      r.date,
+      r.amountFmt,
+      r.kgFmt,
+      r.todayValFmt,
+      r.note
+    ]),
+    ['JAMI', '', '', '', moneyFmt(totalSum), kgFmt(totalKg), moneyFmt(totalTodayValue), '']
+  ];
+  const csvContent = '\uFEFF' + csvLines.map(row => row.map(cell).join(';')).join('\r\n');
+
+  const caption = (
+    "📊 <b>To‘yona Hisoboti (Excel)</b>\n\n" +
+    `💰 <b>Jami to‘yona:</b> ${moneyFmt(totalSum)}\n` +
+    `🥩 <b>Go‘sht ekvivalenti:</b> ${kgFmt(totalKg)}\n` +
+    `💵 <b>Bugungi qiymati:</b> ${moneyFmt(totalTodayValue)}\n` +
+    `🎉 <b>To‘ylar:</b> ${weddings.rows.length} ta | 👥 <b>Oshnalar:</b> ${friends.rows.length} ta\n` +
+    `📝 <b>Kiritilgan yozuvlar:</b> ${gifts.rows.length} ta\n` +
+    `🍖 <b>Bugungi 1 kg narxi:</b> ${moneyFmt(currentPrice)}\n\n` +
+    "📁 <i>Quyidagi Excel faylini ochsangiz, barcha to‘yona va oshnalar toza, tushunarli jadvalda ko‘rinadi!</i>"
+  );
+
+  return { excelHtml, csvContent, caption, totalSum, totalKg, totalTodayValue };
+}
+
+async function fetchReportData(owner) {
+  return await Promise.all([
+    query('SELECT current_price FROM settings WHERE telegram_id=$1', [owner]),
+    query('SELECT * FROM friends WHERE telegram_id=$1 ORDER BY name COLLATE "C"', [owner]),
+    query('SELECT * FROM weddings WHERE telegram_id=$1 ORDER BY wedding_date DESC NULLS LAST, created_at DESC', [owner]),
+    query(`
+      SELECT w.name AS wedding, w.wedding_date, w.meat_price AS wedding_price,
+             f.name AS friend, g.wedding_id, g.amount, g.meat_price AS gift_price, g.note
+      FROM gifts g
+      JOIN weddings w ON w.id=g.wedding_id
+      JOIN friends f ON f.id=g.friend_id
+      WHERE g.telegram_id=$1
+      ORDER BY w.wedding_date DESC NULLS LAST, w.name, f.name
+    `, [owner])
+  ]);
+}
+
+app.get('/api/export.xls', asyncHandler(async (req, res) => {
+  const [settings, friends, weddings, gifts] = await fetchReportData(req.user.id);
+  const { excelHtml } = buildToyonaReport(settings, friends, weddings, gifts);
+  res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="toyona_hisoboti.xls"');
+  res.send(excelHtml);
+}));
+
+app.get('/api/export.csv', asyncHandler(async (req, res) => {
+  const [settings, friends, weddings, gifts] = await fetchReportData(req.user.id);
+  const { csvContent } = buildToyonaReport(settings, friends, weddings, gifts);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="toyona-hisoboti.csv"');
-  res.send(csv);
+  res.setHeader('Content-Disposition', 'attachment; filename="toyona_hisoboti.csv"');
+  res.send(csvContent);
 }));
 
 app.post('/api/send-telegram-report', asyncHandler(async (req, res) => {
@@ -341,60 +545,17 @@ app.post('/api/send-telegram-report', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'Telegram Bot Token sozlanmagan.' });
   }
 
-  const [settings, friends, weddings, gifts] = await Promise.all([
-    query('SELECT current_price FROM settings WHERE telegram_id=$1', [owner]),
-    query('SELECT * FROM friends WHERE telegram_id=$1 ORDER BY name COLLATE "C"', [owner]),
-    query('SELECT * FROM weddings WHERE telegram_id=$1 ORDER BY wedding_date DESC NULLS LAST, created_at DESC', [owner]),
-    query(`
-      SELECT w.name AS wedding, w.wedding_date, w.meat_price AS wedding_price,
-             f.name AS friend, g.amount, g.meat_price AS gift_price, g.note
-      FROM gifts g
-      JOIN weddings w ON w.id=g.wedding_id
-      JOIN friends f ON f.id=g.friend_id
-      WHERE g.telegram_id=$1
-      ORDER BY w.wedding_date DESC NULLS LAST, w.name, f.name
-    `, [owner])
-  ]);
-
-  const currentPrice = Number(settings.rows[0]?.current_price || 150000);
-  const totalSum = gifts.rows.reduce((s, g) => s + Number(g.amount || 0), 0);
-  const totalKg = gifts.rows.reduce((s, g) => s + (Number(g.amount || 0) / Number(g.gift_price || currentPrice)), 0);
-
-  const cell = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-  const csvContent = '\uFEFF' + [
-    ['To‘y', 'Sana', 'To‘y paytidagi kg narxi (so‘m)', 'Oshna', 'Summa (so‘m)', 'Yozuvdagi kg narxi (so‘m)', 'Izoh'],
-    ...gifts.rows.map(r => [
-      r.wedding,
-      r.wedding_date ? String(r.wedding_date).slice(0, 10) : '',
-      r.wedding_price,
-      r.friend,
-      r.amount,
-      r.gift_price,
-      r.note
-    ])
-  ].map(row => row.map(cell).join(';')).join('\r\n');
-
-  const moneyFmt = n => Math.round(Number(n) || 0).toLocaleString('uz-UZ').replace(/,/g, ' ') + " so‘m";
-  const kgFmt = n => (Math.round((Number(n) || 0) * 10) / 10).toLocaleString('uz-UZ') + " kg";
-
-  const caption = (
-    "📊 <b>To‘yona Hisoboti (Excel / CSV)</b>\n\n" +
-    `💰 <b>Jami yig‘ilgan to‘yona:</b> ${moneyFmt(totalSum)}\n` +
-    `🥩 <b>Jami go‘sht ekvivalenti:</b> ${kgFmt(totalKg)}\n` +
-    `🎉 <b>To‘ylar:</b> ${weddings.rows.length} ta | 👥 <b>Oshnalar:</b> ${friends.rows.length} ta\n` +
-    `📝 <b>Kiritilgan yozuvlar:</b> ${gifts.rows.length} ta\n` +
-    `🍖 <b>Bugungi 1 kg narxi:</b> ${moneyFmt(currentPrice)}\n\n` +
-    "📁 <i>Barcha yozuvlar jadval holatida ushbu CSV faylida saqlangan. Excel yoki telefon brauzerida ochishingiz mumkin.</i>"
-  );
+  const [settings, friends, weddings, gifts] = await fetchReportData(owner);
+  const { excelHtml, caption } = buildToyonaReport(settings, friends, weddings, gifts);
 
   const targetChatId = owner || process.env.ADMIN_ID || '7813512925';
   const nowStr = new Date().toISOString().slice(0, 10);
-  const filename = `toyona_hisoboti_${nowStr}.csv`;
+  const filename = `toyona_hisoboti_${nowStr}.xls`;
 
   try {
     const formData = new FormData();
     formData.append('chat_id', targetChatId);
-    const fileBlob = new Blob([Buffer.from(csvContent, 'utf-8')], { type: 'text/csv' });
+    const fileBlob = new Blob([Buffer.from(excelHtml, 'utf-8')], { type: 'application/vnd.ms-excel' });
     formData.append('document', fileBlob, filename);
     formData.append('caption', caption);
     formData.append('parse_mode', 'HTML');
@@ -418,7 +579,7 @@ app.post('/api/send-telegram-report', asyncHandler(async (req, res) => {
       });
     }
 
-    return res.json({ ok: true, message: 'Hisobot Telegram botingizga yuborildi!' });
+    return res.json({ ok: true, message: 'Excel hisoboti Telegram botingizga yuborildi!' });
   } catch (err) {
     console.error('[TOYONA SEND TG REPORT ERROR]:', err);
     return res.status(500).json({ error: 'Telegramga yuborishda xatolik: ' + err.message });

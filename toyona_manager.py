@@ -239,6 +239,10 @@ def export_toyona_data():
             conn = psycopg2.connect(conn_str)
             cur = conn.cursor()
 
+            cur.execute("SELECT current_price FROM settings LIMIT 1")
+            s_row = cur.fetchone()
+            current_price = float(s_row[0]) if (s_row and s_row[0]) else 150000.0
+
             cur.execute("SELECT * FROM friends ORDER BY name")
             friends = []
             for r in cur.fetchall():
@@ -268,6 +272,7 @@ def export_toyona_data():
             data = {
                 "backup_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "database_provider": "Neon PostgreSQL",
+                "settings": {"current_price": current_price},
                 "stats": {
                     "total_friends": len(friends),
                     "total_weddings": len(weddings),
@@ -294,9 +299,13 @@ def export_toyona_data():
         )
         if res.ok:
             payload = res.json()
+            curr_price = 150000.0
+            if isinstance(payload.get("settings"), dict):
+                curr_price = float(payload.get("settings", {}).get("current_price", 150000))
             data = {
                 "backup_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "database_provider": "Neon PostgreSQL (via API)",
+                "settings": {"current_price": curr_price},
                 "stats": {
                     "total_friends": len(payload.get("friends", [])),
                     "total_weddings": len(payload.get("weddings", [])),
@@ -331,52 +340,196 @@ def generate_and_send_toyona_report(chat_id):
     if err or not data:
         return False, err or "Ma'lumot topilmadi"
 
-    friends_map = {f["id"]: f["name"] for f in data.get("friends", [])}
+    friends_map = {f["id"]: f.get("name", "Noma'lum") for f in data.get("friends", [])}
     weddings_map = {w["id"]: w for w in data.get("weddings", [])}
     gifts = data.get("gifts", [])
 
-    total_amount = sum(g.get("amount", 0) for g in gifts)
-    total_kg = sum(g.get("amount", 0) / (g.get("meat_price", 0) or 150000) for g in gifts)
+    current_price = float(data.get("settings", {}).get("current_price", 150000.0))
+
+    def money_fmt(n):
+        return f"{int(round(float(n or 0))):,}".replace(",", " ") + " so‘m"
+
+    def kg_fmt(n):
+        return f"{float(n or 0):.1f} kg"
+
+    total_sum = 0
+    total_kg = 0.0
+    total_today_val = 0
+
+    rows_data = []
+    for idx, g in enumerate(gifts):
+        w = weddings_map.get(g.get("wedding_id"), {})
+        w_name = (w.get("name") + " to‘yi") if w.get("name") else "-"
+        w_date = (w.get("wedding_date") or "")[:10]
+        f_name = friends_map.get(g.get("friend_id"), "Noma'lum oshna")
+
+        amount = int(g.get("amount") or 0)
+        gift_price = float(g.get("meat_price") or w.get("meat_price") or current_price)
+        kg = (amount / gift_price) if gift_price > 0 else 0.0
+        today_val = int(round(kg * current_price))
+
+        total_sum += amount
+        total_kg += kg
+        total_today_val += today_val
+
+        rows_data.append({
+            "num": idx + 1,
+            "friend": f_name,
+            "wedding": w_name,
+            "date": w_date or "-",
+            "amount_fmt": money_fmt(amount),
+            "kg_fmt": kg_fmt(kg),
+            "today_val_fmt": money_fmt(today_val),
+            "note": g.get("note") or "-"
+        })
+
+    # Summary by weddings
+    wedding_stats = {}
+    for wid, w in weddings_map.items():
+        wedding_stats[wid] = {
+            "name": (w.get("name") + " to‘yi") if w.get("name") else "-",
+            "date": (w.get("wedding_date") or "")[:10] or "-",
+            "count": 0,
+            "sum": 0,
+            "kg": 0.0
+        }
+    for g in gifts:
+        wid = g.get("wedding_id")
+        if wid in wedding_stats:
+            amt = int(g.get("amount") or 0)
+            gp = float(g.get("meat_price") or weddings_map.get(wid, {}).get("meat_price") or current_price)
+            k = (amt / gp) if gp > 0 else 0.0
+            wedding_stats[wid]["count"] += 1
+            wedding_stats[wid]["sum"] += amt
+            wedding_stats[wid]["kg"] += k
+
+    wedding_list = sorted(wedding_stats.values(), key=lambda x: x["sum"], reverse=True)
+
+    today_str = datetime.now().strftime("%d.%m.%Y")
+    gift_rows_html = "".join([
+        f"""<tr>
+          <td style="text-align:center;">{r['num']}</td>
+          <td><b>{r['friend']}</b></td>
+          <td>{r['wedding']}</td>
+          <td style="text-align:center;">{r['date']}</td>
+          <td style="text-align:right;">{r['amount_fmt']}</td>
+          <td style="text-align:right;">{r['kg_fmt']}</td>
+          <td style="text-align:right;">{r['today_val_fmt']}</td>
+          <td>{r['note']}</td>
+        </tr>""" for r in rows_data
+    ]) if rows_data else '<tr><td colspan="8" style="text-align:center;color:#888;padding:15px;">To‘yona yozuvlari kiritilmagan</td></tr>'
+
+    wedding_rows_html = "".join([
+        f"""<tr>
+          <td style="text-align:center;">{idx + 1}</td>
+          <td><b>{w['name']}</b></td>
+          <td style="text-align:center;">{w['date']}</td>
+          <td style="text-align:center;">{w['count']} kishi</td>
+          <td style="text-align:right;">{money_fmt(w['sum'])}</td>
+          <td style="text-align:right;">{kg_fmt(w['kg'])}</td>
+        </tr>""" for idx, w in enumerate(wedding_list)
+    ]) if wedding_list else '<tr><td colspan="6" style="text-align:center;color:#888;padding:15px;">To‘ylar mavjud emas</td></tr>'
+
+    excel_html = f"""\ufeff<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<!--[if gte mso 9]>
+<xml>
+ <x:ExcelWorkbook>
+  <x:ExcelWorksheets>
+   <x:ExcelWorksheet>
+    <x:Name>Toyona hisoboti</x:Name>
+    <x:WorksheetOptions>
+     <x:DisplayGridlines/>
+    </x:WorksheetOptions>
+   </x:ExcelWorksheet>
+  </x:ExcelWorksheets>
+ </x:ExcelWorkbook>
+</xml>
+<![endif]-->
+<style>
+  body {{ font-family: Calibri, 'Segoe UI', Arial, sans-serif; font-size: 11pt; color: #1e2924; }}
+  table {{ border-collapse: collapse; margin-bottom: 22px; width: 100%; }}
+  th {{ background-color: #0d785b; color: #ffffff; font-weight: bold; border: 1px solid #084c39; padding: 8px 10px; font-size: 11pt; }}
+  td {{ border: 1px solid #d3ded8; padding: 7px 10px; font-size: 10.5pt; }}
+  .head-sec {{ background-color: #164e3f; color: #ffffff; font-size: 12pt; font-weight: bold; padding: 7px 10px; }}
+  .total-row {{ background-color: #e5f4ed; font-weight: bold; color: #084c39; }}
+  .summary-lbl {{ background-color: #f6faf8; font-weight: 600; width: 280px; }}
+  .summary-val {{ font-weight: bold; color: #0d785b; }}
+</style>
+</head>
+<body>
+  <h2 style="color:#0d785b;margin:0 0 4px;font-size:16pt;">💒 TO‘YONA HISOBOTI</h2>
+  <p style="margin:0 0 16px;color:#556;font-size:10pt;">Tayyorlangan sana: <b>{today_str}</b> | Bugungi 1 kg go‘sht narxi: <b>{money_fmt(current_price)}</b></p>
+
+  <table>
+    <tr><th colspan="2" class="head-sec">📊 1. UMUMIY KO‘RSATKICHLAR</th></tr>
+    <tr><td class="summary-lbl">Jami yig‘ilgan to‘yona summasi:</td><td class="summary-val">{money_fmt(total_sum)}</td></tr>
+    <tr><td class="summary-lbl">Jami go‘sht ekvivalenti:</td><td class="summary-val">{kg_fmt(total_kg)}</td></tr>
+    <tr><td class="summary-lbl">Bugungi narxdagi umumiy qiymati:</td><td class="summary-val">{money_fmt(total_today_val)}</td></tr>
+    <tr><td class="summary-lbl">Jami to‘ylar soni:</td><td>{len(weddings_map)} ta</td></tr>
+    <tr><td class="summary-lbl">Jami oshnalar soni:</td><td>{len(friends_map)} ta</td></tr>
+    <tr><td class="summary-lbl">Kiritilgan to‘yona yozuvlari:</td><td>{len(gifts)} ta</td></tr>
+  </table>
+
+  <table>
+    <tr><th colspan="8" class="head-sec">📋 2. BARCHA TO‘YONALARNING BATAFSIL RO‘YXATI</th></tr>
+    <tr>
+      <th style="width:45px;text-align:center;">№</th>
+      <th style="text-align:left;">Oshna (Do‘st ismi)</th>
+      <th style="text-align:left;">Qaysi to‘y</th>
+      <th style="text-align:center;">To‘y sanasi</th>
+      <th style="text-align:right;">Berilgan to‘yona</th>
+      <th style="text-align:right;">Go‘sht miqdori</th>
+      <th style="text-align:right;">Bugungi qiymati</th>
+      <th style="text-align:left;">Izoh</th>
+    </tr>
+    {giftRowsHtml}
+    <tr class="total-row">
+      <td colspan="4" style="text-align:right;">JAMI:</td>
+      <td style="text-align:right;">{money_fmt(total_sum)}</td>
+      <td style="text-align:right;">{kg_fmt(total_kg)}</td>
+      <td style="text-align:right;">{money_fmt(total_today_val)}</td>
+      <td></td>
+    </tr>
+  </table>
+
+  <table>
+    <tr><th colspan="6" class="head-sec">🎉 3. TO‘YLAR BO‘YICHA JAMLANMA</th></tr>
+    <tr>
+      <th style="width:45px;text-align:center;">№</th>
+      <th style="text-align:left;">To‘y nomi</th>
+      <th style="text-align:center;">Sanasi</th>
+      <th style="text-align:center;">To‘yona berganlar</th>
+      <th style="text-align:right;">Jami summa</th>
+      <th style="text-align:right;">Jami go‘sht ekv.</th>
+    </tr>
+    {weddingRowsHtml}
+  </table>
+</body>
+</html>"""
 
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-    csv_file = f"toyona_hisoboti_{ts}.csv"
+    xls_file = f"toyona_hisoboti_{ts}.xls"
 
-    def escape_csv(val):
-        s = str(val if val is not None else "")
-        return '"' + s.replace('"', '""') + '"'
-
-    rows = [
-        ["To‘y", "Sana", "To‘y paytidagi kg narxi (so‘m)", "Oshna", "Summa (so‘m)", "Yozuvdagi kg narxi (so‘m)", "Izoh"]
-    ]
-
-    for g in gifts:
-        w = weddings_map.get(g.get("wedding_id"), {})
-        w_name = w.get("name", "Noma'lum to'y")
-        w_date = (w.get("wedding_date") or "")[:10]
-        w_price = w.get("meat_price", "")
-        f_name = friends_map.get(g.get("friend_id"), "Noma'lum oshna")
-        rows.append([w_name, w_date, w_price, f_name, g.get("amount", 0), g.get("meat_price", ""), g.get("note", "")])
-
-    with open(csv_file, "w", encoding="utf-8-sig") as f:
-        for r in rows:
-            f.write(";".join(escape_csv(x) for x in r) + "\n")
-
-    money_fmt = f"{int(total_amount):,}".replace(",", " ") + " so‘m"
-    kg_fmt = f"{total_kg:.1f} kg"
+    with open(xls_file, "w", encoding="utf-8") as f:
+        f.write(excel_html)
 
     caption = (
-        "📊 <b>To‘yona Hisoboti (Excel / CSV)</b>\n\n"
-        f"💰 <b>Jami yig‘ilgan to‘yona:</b> {money_fmt}\n"
-        f"🥩 <b>Jami go‘sht ekvivalenti:</b> {kg_fmt}\n"
-        f"🎉 <b>To‘ylar soni:</b> {len(weddings_map)} ta | 👥 <b>Oshnalar:</b> {len(friends_map)} ta\n"
-        f"📝 <b>Yozuvlar:</b> {len(gifts)} ta\n\n"
-        "📁 <i>To‘liq jadval fayli ilova qilindi. Excel yoki telefon brauzerida ochishingiz mumkin.</i>"
+        "📊 <b>To‘yona Hisoboti (Excel)</b>\n\n"
+        f"💰 <b>Jami to‘yona:</b> {money_fmt(total_sum)}\n"
+        f"🥩 <b>Go‘sht ekvivalenti:</b> {kg_fmt(total_kg)}\n"
+        f"💵 <b>Bugungi qiymati:</b> {money_fmt(total_today_val)}\n"
+        f"🎉 <b>To‘ylar:</b> {len(weddings_map)} ta | 👥 <b>Oshnalar:</b> {len(friends_map)} ta\n"
+        f"📝 <b>Kiritilgan yozuvlar:</b> {len(gifts)} ta\n"
+        f"🍖 <b>Bugungi 1 kg narxi:</b> {money_fmt(current_price)}\n\n"
+        "📁 <i>Quyidagi Excel faylini ochsangiz, barcha to‘yona va oshnalar toza, tushunarli jadvalda ko‘rinadi!</i>"
     )
 
-    ok = send_file_to_telegram(chat_id, csv_file, caption=caption)
+    ok = send_file_to_telegram(chat_id, xls_file, caption=caption)
     try:
-        if os.path.exists(csv_file):
-            os.remove(csv_file)
+        if os.path.exists(xls_file):
+            os.remove(xls_file)
     except Exception:
         pass
 

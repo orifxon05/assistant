@@ -249,12 +249,13 @@
       ${totalsByWedding.length?`<div class="list">${totalsByWedding.map(x=>`<div class="card"><div class="card-row"><div><div class="card-title">${esc(x.w.name)} to‘yi</div><div class="muted">${dateText(x.w.wedding_date)} · ${x.count} kishi</div></div><div class="right"><div class="amount">${compactMoney(x.total)}</div><div class="muted">so‘m</div></div></div></div>`).join('')}</div>`:empty('▤','Hisobot hali bo‘sh','To‘y va to‘yona qo‘shilgach, jamlanma shu yerda ko‘rinadi.')}
       <div class="card">
         <div class="card-title">📊 Hisobotni olish va yuklash</div>
-        <p class="muted">Barcha to‘ylar, oshnalar, summa va izohlarni o‘z ichiga olgan to‘liq jadval (Excel/CSV).</p>
+        <p class="muted">Barcha to‘ylar, oshnalar, summa va go‘sht hisob-kitoblarini o‘z ichiga olgan toza, tushunarli jadval.</p>
         <div class="action-row" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
-          <button class="btn primary full" id="sendTgBtn" data-action="send-telegram-report">📤 Telegram botga hisobotni yuborish</button>
-          <button class="btn secondary full" data-action="export-csv">↓ Brauzer orqali yuklab olish (CSV)</button>
+          <button class="btn primary full" id="sendTgBtn" data-action="send-telegram-report">📤 Telegram botga yuborish (Excel)</button>
+          <button class="btn secondary full" data-action="export-excel">📊 Excel faylni yuklab olish (.xls)</button>
+          <button class="btn secondary full" data-action="export-csv">↓ CSV faylni yuklab olish (.csv)</button>
         </div>
-        <p class="note" style="margin-top:10px">💡 <b>Telegram botga yuborish</b> orqali fayl to‘g‘ridan-to‘g‘ri shaxsiy botingizga yuboriladi, telefoningiz fayllaridan qidirib yurmaysiz!</p>
+        <p class="note" style="margin-top:10px">💡 <b>Telegram botga yuborish</b> orqali chiroyli Excel fayli to‘g‘ridan-to‘g‘ri shaxsiy botingizga yuboriladi, fayllar orasidan qidirib yurmaysiz!</p>
       </div>`;
   }
 
@@ -421,6 +422,25 @@
     if(input){input.value=el.dataset.amount;await saveGift(input);}
   }
 
+  async function exportExcel() {
+    try {
+      const response = await api('/api/export.xls');
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const nowStr = new Date().toISOString().slice(0, 10);
+      a.download = `toyona_hisoboti_${nowStr}.xls`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast('Excel hisoboti yuklab olindi.');
+    } catch (err) {
+      fail(err);
+    }
+  }
+
   async function exportCsv() {
     try {
       const response = await api('/api/export.csv');
@@ -428,12 +448,13 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'toyona-hisoboti.csv';
+      const nowStr = new Date().toISOString().slice(0, 10);
+      a.download = `toyona_hisoboti_${nowStr}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      toast('Hisobot yuklab olindi.');
+      toast('CSV hisoboti yuklab olindi.');
     } catch (err) {
       fail(err);
     }
@@ -446,13 +467,13 @@
     }
     try {
       const res = await api('/api/send-telegram-report', { method: 'POST' });
-      toast(res.message || '✅ Hisobot Telegram botingizga yuborildi!');
+      toast(res.message || '✅ Excel hisoboti Telegram botingizga yuborildi!');
     } catch (err) {
       fail(err);
     } finally {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = '📤 Telegram botga hisobotni yuborish';
+        btn.textContent = '📤 Telegram botga yuborish (Excel)';
       }
     }
   }
@@ -482,6 +503,7 @@
         await load(false);
         toast('Narx saqlandi.');
       }
+      else if (a === 'export-excel') await exportExcel();
       else if (a === 'export-csv') await exportCsv();
       else if (a === 'send-telegram-report') await sendTelegramReport(el);
       else if (a === 'go-reports') setPage('reports');
