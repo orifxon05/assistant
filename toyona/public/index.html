@@ -27,7 +27,19 @@
       <button class="nav-item" data-page="reports"><span>▤</span><small>Hisobot</small></button>
     </nav>
   </div>
-  <dialog id="modal"><form method="dialog" id="modalForm"><div class="modal-head"><h2 id="modalTitle">Ma’lumot</h2><button class="icon-btn" value="cancel" aria-label="Yopish">×</button></div><div id="modalBody"></div><div class="modal-actions"><button class="btn secondary" value="cancel">Bekor qilish</button><button class="btn primary" id="modalSave" value="default">Saqlash</button></div></form></dialog>
+  <dialog id="modal">
+    <div class="modal-head">
+      <h2 id="modalTitle">Ma’lumot</h2>
+      <button type="button" class="icon-btn" id="modalCloseBtn" aria-label="Yopish" title="Yopish">×</button>
+    </div>
+    <form id="modalForm">
+      <div id="modalBody"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="modalCancelBtn">Bekor qilish</button>
+        <button type="submit" class="btn primary" id="modalSave">Saqlash</button>
+      </div>
+    </form>
+  </dialog>
   <script src="/app.js"></script>
 </body>
 </html>

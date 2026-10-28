@@ -54,6 +54,9 @@
   const modalBody = document.getElementById('modalBody');
   const modalTitle = document.getElementById('modalTitle');
   const modalSave = document.getElementById('modalSave');
+  const modalCloseBtn = document.getElementById('modalCloseBtn');
+  const modalCancelBtn = document.getElementById('modalCancelBtn');
+  const modalForm = document.getElementById('modalForm');
   let modalHandler = null;
   let toastTimer = null;
 
@@ -212,14 +215,14 @@
       const ownerId = w.friend_id;
       const historicalKg = ownerId ? state.gifts.filter(x=>x.friend_id===ownerId && wedding(x.wedding_id)?.friend_id===f.id).reduce((s,x)=>s+meatKg(x),0) : 0;
       const due = Math.max(0, historicalKg*state.currentPrice - a);
-      return `<div class="card"><div class="gift-row"><div><div class="gift-name">${a?'<span class="green">✓</span> ':''}${esc(f.name)}</div><div class="gift-kg">${a?`${kg(meatKg(g))} kg · ${money(a)}`:'Hali kiritilmagan'}</div>${a>0&&a<minAmount?'<div class="muted" style="color:var(--orange);margin-top:4px">Minimumdan kam</div>':''}${due>0?`<div class="debt-line">Oldingi to‘yonalar bo‘yicha taxminiy tavsiya: ${money(due)} <button class="btn secondary small" data-action="fill-due" data-friend="${f.id}" data-wedding="${id}" data-amount="${Math.round(due)}">Summani yozish</button></div>`:''}</div><input class="gift-input" inputmode="numeric" type="number" min="0" step="1000" placeholder="So‘m" aria-label="${esc(f.name)} to‘yonasi" data-gift-input data-wedding="${id}" data-friend="${f.id}" value="${a||''}"></div></div>`;
+      return `<div class="card" id="gift-card-${f.id}"><div class="gift-row"><div><div class="gift-name" id="gift-name-${f.id}">${a?'<span class="green">✓</span> ':''}${esc(f.name)}</div><div class="gift-kg" id="gift-kg-${f.id}">${a?`${kg(meatKg(g))} kg · ${money(a)}`:'Hali kiritilmagan'}</div>${a>0&&a<minAmount?'<div class="muted" style="color:var(--orange);margin-top:4px">Minimumdan kam</div>':''}${due>0?`<div class="debt-line">Oldingi to‘yonalar bo‘yicha taxminiy tavsiya: ${money(due)} <button class="btn secondary small" data-action="fill-due" data-friend="${f.id}" data-wedding="${id}" data-amount="${Math.round(due)}">Summani yozish</button></div>`:''}</div><input class="gift-input" inputmode="numeric" type="number" min="0" step="1000" placeholder="So‘m" aria-label="${esc(f.name)} to‘yonasi" data-gift-input data-wedding="${id}" data-friend="${f.id}" value="${a||''}"></div></div>`;
     }).join('');
 
     return `<button class="btn secondary small" data-action="back-weddings">‹ To‘ylar</button><div class="section-head"><h2>${esc(w.name)} to‘yi</h2></div><p class="page-sub">${dateText(w.wedding_date)} · ${money(meatPrice(w))}/kg · minimum ${kg(w.min_kg)} kg (${money(minAmount)})</p>
-      ${stats([{value:compactMoney(total),label:'Jami so‘m'},{value:kg(gs.reduce((s,g)=>s+meatKg(g),0))+' kg',label:'Go‘sht ekvivalenti'},{value:`${gs.length}/${state.friends.length}`,label:'To‘yona bergan'}])}
+      <div id="wedding-stats-box">${stats([{value:compactMoney(total),label:'Jami so‘m'},{value:kg(gs.reduce((s,g)=>s+meatKg(g),0))+' kg',label:'Go‘sht ekvivalenti'},{value:`${gs.length}/${state.friends.length}`,label:'To‘yona bergan'}])}</div>
       <div class="action-row">${button('✎ To‘yni tahrirlash','edit-wedding','secondary')}${button('O‘chirish','delete-wedding','danger')}</div>
-      <div class="section-head"><h2>To‘yona ro‘yxati</h2><span class="subtle">Summani kiriting</span></div>
-      ${state.friends.length?list:empty('♙','Oshnalar yo‘q','Avval Oshnalar bo‘limidan ism qo‘shing.')}
+      <div class="section-head"><h2>To‘yona ro‘yxati</h2><button class="btn secondary small" data-action="add-friend">+ Oshna qo‘shish</button></div>
+      ${state.friends.length?list:empty('♙','Oshnalar yo‘q','Avval Oshnalar qo‘shing.',button('+ Oshna qo‘shish','add-friend'))}
       <p class="note">💡 Summani kiritib 'Enter' bosing yoki boshqa joyga bosing — ma’lumot avtomatik saqlanadi!</p>`;
   }
 
@@ -265,10 +268,31 @@
     else app.innerHTML=reportsPage();
   }
 
-  function openModal(title,body,handler,saveText='Saqlash') {
-    modalTitle.textContent=title;modalBody.innerHTML=body;modalHandler=handler;modalSave.textContent=saveText;
-    modalSave.disabled=false;
-    if(!modal.open) modal.showModal();
+  function openModal(title, body, handler, saveText = 'Saqlash') {
+    modalTitle.textContent = title;
+    modalBody.innerHTML = body;
+    modalHandler = handler;
+    modalSave.textContent = saveText;
+    modalSave.disabled = false;
+    modalSave.classList.remove('danger');
+    if (!modal.open) modal.showModal();
+    setTimeout(() => {
+      const firstInput = modalBody.querySelector('input, select, textarea');
+      firstInput?.focus();
+      if (firstInput && typeof firstInput.select === 'function' && firstInput.type !== 'date') {
+        firstInput.select();
+      }
+    }, 60);
+  }
+
+  function closeModal() {
+    if (modal && modal.open) {
+      modal.close();
+    }
+    modalHandler = null;
+    modalSave.classList.remove('danger');
+    modalSave.disabled = false;
+    modalSave.textContent = 'Saqlash';
   }
 
   function field(label,name,value='',type='text',extra='') {
@@ -325,20 +349,70 @@
 
   async function saveGift(input) {
     const wid = input.dataset.wedding, fid = input.dataset.friend;
-    const raw = String(input.value||'').trim(), amountValue = raw===''?0:Number(raw);
+    const raw = String(input.value || '').trim(), amountValue = raw === '' ? 0 : Number(raw);
     if (!Number.isSafeInteger(amountValue) || amountValue < 0) {
       toast('Summani musbat butun son kiriting.');
       return;
     }
-    input.disabled = true;
+    const w = wedding(wid);
+    const f = friend(fid);
+    const fName = f?.name || 'Oshna';
+    const oldGift = gift(wid, fid);
+    const oldAmount = oldGift ? Number(oldGift.amount || 0) : 0;
+
+    if (amountValue === oldAmount) return;
+
+    // 1. In-memory yangilash
+    if (amountValue === 0) {
+      state.gifts = state.gifts.filter(g => !(g.wedding_id === wid && g.friend_id === fid));
+    } else if (oldGift) {
+      oldGift.amount = amountValue;
+    } else {
+      state.gifts.push({
+        id: 'g-' + Date.now(),
+        wedding_id: wid,
+        friend_id: fid,
+        amount: amountValue,
+        meat_price: w?.meat_price || state.currentPrice,
+        note: ''
+      });
+    }
+
+    // 2. Qatorni sahifani qayta chizmasdan yangilash (fokus yo'qolmaydi)
+    const nameEl = document.getElementById(`gift-name-${fid}`);
+    const kgEl = document.getElementById(`gift-kg-${fid}`);
+    if (nameEl) {
+      nameEl.innerHTML = `${amountValue ? '<span class="green">✓</span> ' : ''}${esc(fName)}`;
+    }
+    if (kgEl) {
+      const g = gift(wid, fid);
+      kgEl.textContent = amountValue ? `${kg(meatKg(g))} kg · ${money(amountValue)}` : 'Hali kiritilmagan';
+    }
+
+    const statsBox = document.getElementById('wedding-stats-box');
+    if (statsBox && w) {
+      const gs = weddingGifts(wid);
+      const total = weddingTotal(w);
+      const kgTotal = gs.reduce((s, g) => s + meatKg(g), 0);
+      statsBox.innerHTML = stats([
+        { value: compactMoney(total), label: 'Jami so‘m' },
+        { value: kg(kgTotal) + ' kg', label: 'Go‘sht ekvivalenti' },
+        { value: `${gs.length}/${state.friends.length}`, label: 'To‘yona bergan' }
+      ]);
+    }
+
+    // 3. Serverga jo'natish
     try {
       await api('/api/gifts', { method: 'PUT', body: JSON.stringify({ weddingId: wid, friendId: fid, amount: amountValue }) });
-      await load(false);
-      const fName = friend(fid)?.name || 'Oshna';
       toast(amountValue ? `✓ ${fName}: ${money(amountValue)} saqlandi` : `${fName} to‘yona yozuvi o‘chirildi`);
     } catch(e) {
+      if (oldAmount === 0) {
+        state.gifts = state.gifts.filter(g => !(g.wedding_id === wid && g.friend_id === fid));
+      } else if (oldGift) {
+        oldGift.amount = oldAmount;
+      }
+      input.value = oldAmount || '';
       fail(e);
-      input.disabled = false;
     }
   }
 
@@ -414,17 +488,33 @@
     } catch (err) { fail(err); }
   });
 
-  document.addEventListener('submit', e => e.preventDefault());
-  modal.addEventListener('click', e => { if (e.target === modal) modal.close(); });
-  modal.addEventListener('close', () => { modalHandler = null; modalSave.classList.remove('danger'); });
-  modalSave.addEventListener('click', async e => {
-    if (!modalHandler) return;
+  modalCloseBtn?.addEventListener('click', closeModal);
+  modalCancelBtn?.addEventListener('click', closeModal);
+
+  modal?.addEventListener('click', e => {
+    if (e.target === modal) closeModal();
+  });
+
+  modal?.addEventListener('cancel', e => {
     e.preventDefault();
+    closeModal();
+  });
+
+  modalForm?.addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!modalHandler || modalSave.disabled) return;
     modalSave.disabled = true;
+    const oldText = modalSave.textContent;
     modalSave.textContent = 'Saqlanmoqda...';
-    try { await modalHandler(); modal.close(); }
-    catch (err) { fail(err); }
-    finally { modalSave.disabled = false; modalSave.textContent = 'Saqlash'; }
+    try {
+      await modalHandler();
+      closeModal();
+    } catch (err) {
+      fail(err);
+    } finally {
+      modalSave.disabled = false;
+      modalSave.textContent = oldText;
+    }
   });
 
   document.addEventListener('change', async e => {
