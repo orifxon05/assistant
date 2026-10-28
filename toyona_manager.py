@@ -239,9 +239,10 @@ def export_toyona_data():
             conn = psycopg2.connect(conn_str)
             cur = conn.cursor()
 
-            cur.execute("SELECT current_price FROM settings LIMIT 1")
+            cur.execute("SELECT current_price, current_dollar_rate FROM settings LIMIT 1")
             s_row = cur.fetchone()
             current_price = float(s_row[0]) if (s_row and s_row[0]) else 150000.0
+            current_dollar_rate = float(s_row[1]) if (s_row and len(s_row) > 1 and s_row[1]) else 12800.0
 
             cur.execute("SELECT * FROM friends ORDER BY name")
             friends = []
@@ -255,7 +256,9 @@ def export_toyona_data():
                     "id": str(r[0]), "telegram_id": r[1], "friend_id": str(r[2]) if r[2] else None,
                     "name": r[3], "wedding_date": str(r[4]) if r[4] else None,
                     "meat_price": float(r[5]), "min_kg": float(r[6]),
-                    "note": r[7] or "", "archived": r[8]
+                    "note": r[7] or "", "archived": r[8],
+                    "dollar_rate": float(r[9]) if len(r) > 9 and r[9] else 12800.0,
+                    "calc_type": r[10] if len(r) > 10 and r[10] else "both"
                 })
 
             cur.execute("SELECT * FROM gifts")
@@ -264,7 +267,8 @@ def export_toyona_data():
                 gifts.append({
                     "id": str(r[0]), "telegram_id": r[1], "wedding_id": str(r[2]),
                     "friend_id": str(r[3]), "amount": int(r[4]), "meat_price": float(r[5]),
-                    "note": r[6] or ""
+                    "note": r[6] or "",
+                    "dollar_rate": float(r[7]) if len(r) > 7 and r[7] else 12800.0
                 })
 
             conn.close()
@@ -272,7 +276,7 @@ def export_toyona_data():
             data = {
                 "backup_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "database_provider": "Neon PostgreSQL",
-                "settings": {"current_price": current_price},
+                "settings": {"current_price": current_price, "current_dollar_rate": current_dollar_rate},
                 "stats": {
                     "total_friends": len(friends),
                     "total_weddings": len(weddings),
@@ -300,12 +304,14 @@ def export_toyona_data():
         if res.ok:
             payload = res.json()
             curr_price = 150000.0
+            curr_dollar = 12800.0
             if isinstance(payload.get("settings"), dict):
                 curr_price = float(payload.get("settings", {}).get("current_price", 150000))
+                curr_dollar = float(payload.get("settings", {}).get("current_dollar_rate", 12800))
             data = {
                 "backup_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "database_provider": "Neon PostgreSQL (via API)",
-                "settings": {"current_price": curr_price},
+                "settings": {"current_price": curr_price, "current_dollar_rate": curr_dollar},
                 "stats": {
                     "total_friends": len(payload.get("friends", [])),
                     "total_weddings": len(payload.get("weddings", [])),
@@ -345,6 +351,7 @@ def generate_and_send_toyona_report(chat_id):
     gifts = data.get("gifts", [])
 
     current_price = float(data.get("settings", {}).get("current_price", 150000.0))
+    current_dollar_rate = float(data.get("settings", {}).get("current_dollar_rate", 12800.0))
 
     def money_fmt(n):
         return f"{int(round(float(n or 0))):,}".replace(",", " ") + " so‘m"
@@ -352,9 +359,14 @@ def generate_and_send_toyona_report(chat_id):
     def kg_fmt(n):
         return f"{float(n or 0):.1f} kg"
 
+    def dollar_fmt(n):
+        return f"$ {float(n or 0):.1f}"
+
     total_sum = 0
     total_kg = 0.0
-    total_today_val = 0
+    total_dollars = 0.0
+    total_today_meat = 0
+    total_today_dollar = 0
 
     rows_data = []
     for idx, g in enumerate(gifts):
@@ -365,12 +377,18 @@ def generate_and_send_toyona_report(chat_id):
 
         amount = int(g.get("amount") or 0)
         gift_price = float(g.get("meat_price") or w.get("meat_price") or current_price)
+        gift_dollar_rate = float(g.get("dollar_rate") or w.get("dollar_rate") or current_dollar_rate)
+
         kg = (amount / gift_price) if gift_price > 0 else 0.0
-        today_val = int(round(kg * current_price))
+        dollars = (amount / gift_dollar_rate) if gift_dollar_rate > 0 else 0.0
+        today_meat = int(round(kg * current_price))
+        today_dollar = int(round(dollars * current_dollar_rate))
 
         total_sum += amount
         total_kg += kg
-        total_today_val += today_val
+        total_dollars += dollars
+        total_today_meat += today_meat
+        total_today_dollar += today_dollar
 
         rows_data.append({
             "num": idx + 1,
@@ -379,7 +397,9 @@ def generate_and_send_toyona_report(chat_id):
             "date": w_date or "-",
             "amount_fmt": money_fmt(amount),
             "kg_fmt": kg_fmt(kg),
-            "today_val_fmt": money_fmt(today_val),
+            "dollar_fmt": dollar_fmt(dollars),
+            "today_meat_fmt": money_fmt(today_meat),
+            "today_dollar_fmt": money_fmt(today_dollar),
             "note": g.get("note") or "-"
         })
 
@@ -391,17 +411,21 @@ def generate_and_send_toyona_report(chat_id):
             "date": (w.get("wedding_date") or "")[:10] or "-",
             "count": 0,
             "sum": 0,
-            "kg": 0.0
+            "kg": 0.0,
+            "dollars": 0.0
         }
     for g in gifts:
         wid = g.get("wedding_id")
         if wid in wedding_stats:
             amt = int(g.get("amount") or 0)
             gp = float(g.get("meat_price") or weddings_map.get(wid, {}).get("meat_price") or current_price)
+            dr = float(g.get("dollar_rate") or weddings_map.get(wid, {}).get("dollar_rate") or current_dollar_rate)
             k = (amt / gp) if gp > 0 else 0.0
+            dl = (amt / dr) if dr > 0 else 0.0
             wedding_stats[wid]["count"] += 1
             wedding_stats[wid]["sum"] += amt
             wedding_stats[wid]["kg"] += k
+            wedding_stats[wid]["dollars"] += dl
 
     wedding_list = sorted(wedding_stats.values(), key=lambda x: x["sum"], reverse=True)
 
@@ -414,10 +438,12 @@ def generate_and_send_toyona_report(chat_id):
           <td style="text-align:center;">{r['date']}</td>
           <td style="text-align:right;">{r['amount_fmt']}</td>
           <td style="text-align:right;">{r['kg_fmt']}</td>
-          <td style="text-align:right;">{r['today_val_fmt']}</td>
+          <td style="text-align:right;">{r['dollar_fmt']}</td>
+          <td style="text-align:right;">{r['today_meat_fmt']}</td>
+          <td style="text-align:right;">{r['today_dollar_fmt']}</td>
           <td>{r['note']}</td>
         </tr>""" for r in rows_data
-    ]) if rows_data else '<tr><td colspan="8" style="text-align:center;color:#888;padding:15px;">To‘yona yozuvlari kiritilmagan</td></tr>'
+    ]) if rows_data else '<tr><td colspan="10" style="text-align:center;color:#888;padding:15px;">To‘yona yozuvlari kiritilmagan</td></tr>'
 
     wedding_rows_html = "".join([
         f"""<tr>
@@ -427,8 +453,9 @@ def generate_and_send_toyona_report(chat_id):
           <td style="text-align:center;">{w['count']} kishi</td>
           <td style="text-align:right;">{money_fmt(w['sum'])}</td>
           <td style="text-align:right;">{kg_fmt(w['kg'])}</td>
+          <td style="text-align:right;">{dollar_fmt(w['dollars'])}</td>
         </tr>""" for idx, w in enumerate(wedding_list)
-    ]) if wedding_list else '<tr><td colspan="6" style="text-align:center;color:#888;padding:15px;">To‘ylar mavjud emas</td></tr>'
+    ]) if wedding_list else '<tr><td colspan="7" style="text-align:center;color:#888;padding:15px;">To‘ylar mavjud emas</td></tr>'
 
     excel_html = f"""\ufeff<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
 <head>
@@ -460,28 +487,32 @@ def generate_and_send_toyona_report(chat_id):
 </head>
 <body>
   <h2 style="color:#0d785b;margin:0 0 4px;font-size:16pt;">💒 TO‘YONA HISOBOTI</h2>
-  <p style="margin:0 0 16px;color:#556;font-size:10pt;">Tayyorlangan sana: <b>{today_str}</b> | Bugungi 1 kg go‘sht narxi: <b>{money_fmt(current_price)}</b></p>
+  <p style="margin:0 0 16px;color:#556;font-size:10pt;">Tayyorlangan sana: <b>{today_str}</b> | Bugungi 1 kg go‘sht: <b>{money_fmt(current_price)}</b> | Bugungi 1 $ kursi: <b>{money_fmt(current_dollar_rate)}</b></p>
 
   <table>
     <tr><th colspan="2" class="head-sec">📊 1. UMUMIY KO‘RSATKICHLAR</th></tr>
     <tr><td class="summary-lbl">Jami yig‘ilgan to‘yona summasi:</td><td class="summary-val">{money_fmt(total_sum)}</td></tr>
-    <tr><td class="summary-lbl">Jami go‘sht ekvivalenti:</td><td class="summary-val">{kg_fmt(total_kg)}</td></tr>
-    <tr><td class="summary-lbl">Bugungi narxdagi umumiy qiymati:</td><td class="summary-val">{money_fmt(total_today_val)}</td></tr>
+    <tr><td class="summary-lbl">Jami go‘sht ekvivalenti:</td><td class="summary-val">{kg_fmt(total_kg)} (Bugun: {money_fmt(total_today_meat)})</td></tr>
+    <tr><td class="summary-lbl">Jami dollar ekvivalenti:</td><td class="summary-val">{dollar_fmt(total_dollars)} (Bugun: {money_fmt(total_today_dollar)})</td></tr>
+    <tr><td class="summary-lbl">Bugungi 1 kg go‘sht narxi:</td><td>{money_fmt(current_price)}</td></tr>
+    <tr><td class="summary-lbl">Bugungi 1 $ dollari kursi:</td><td>{money_fmt(current_dollar_rate)}</td></tr>
     <tr><td class="summary-lbl">Jami to‘ylar soni:</td><td>{len(weddings_map)} ta</td></tr>
     <tr><td class="summary-lbl">Jami oshnalar soni:</td><td>{len(friends_map)} ta</td></tr>
     <tr><td class="summary-lbl">Kiritilgan to‘yona yozuvlari:</td><td>{len(gifts)} ta</td></tr>
   </table>
 
   <table>
-    <tr><th colspan="8" class="head-sec">📋 2. BARCHA TO‘YONALARNING BATAFSIL RO‘YXATI</th></tr>
+    <tr><th colspan="10" class="head-sec">📋 2. BARCHA TO‘YONALARNING BATAFSIL RO‘YXATI</th></tr>
     <tr>
-      <th style="width:45px;text-align:center;">№</th>
+      <th style="width:40px;text-align:center;">№</th>
       <th style="text-align:left;">Oshna (Do‘st ismi)</th>
       <th style="text-align:left;">Qaysi to‘y</th>
       <th style="text-align:center;">To‘y sanasi</th>
       <th style="text-align:right;">Berilgan to‘yona</th>
-      <th style="text-align:right;">Go‘sht miqdori</th>
-      <th style="text-align:right;">Bugungi qiymati</th>
+      <th style="text-align:right;">Go‘sht (kg)</th>
+      <th style="text-align:right;">Dollar ($)</th>
+      <th style="text-align:right;">Bugun (Go‘sht)</th>
+      <th style="text-align:right;">Bugun (Dollar)</th>
       <th style="text-align:left;">Izoh</th>
     </tr>
     {giftRowsHtml}
@@ -489,20 +520,23 @@ def generate_and_send_toyona_report(chat_id):
       <td colspan="4" style="text-align:right;">JAMI:</td>
       <td style="text-align:right;">{money_fmt(total_sum)}</td>
       <td style="text-align:right;">{kg_fmt(total_kg)}</td>
-      <td style="text-align:right;">{money_fmt(total_today_val)}</td>
+      <td style="text-align:right;">{dollar_fmt(total_dollars)}</td>
+      <td style="text-align:right;">{money_fmt(total_today_meat)}</td>
+      <td style="text-align:right;">{money_fmt(total_today_dollar)}</td>
       <td></td>
     </tr>
   </table>
 
   <table>
-    <tr><th colspan="6" class="head-sec">🎉 3. TO‘YLAR BO‘YICHA JAMLANMA</th></tr>
+    <tr><th colspan="7" class="head-sec">🎉 3. TO‘YLAR BO‘YICHA JAMLANMA</th></tr>
     <tr>
-      <th style="width:45px;text-align:center;">№</th>
+      <th style="width:40px;text-align:center;">№</th>
       <th style="text-align:left;">To‘y nomi</th>
       <th style="text-align:center;">Sanasi</th>
       <th style="text-align:center;">To‘yona berganlar</th>
       <th style="text-align:right;">Jami summa</th>
-      <th style="text-align:right;">Jami go‘sht ekv.</th>
+      <th style="text-align:right;">Go‘sht ekv.</th>
+      <th style="text-align:right;">Dollar ekv.</th>
     </tr>
     {weddingRowsHtml}
   </table>
@@ -518,12 +552,12 @@ def generate_and_send_toyona_report(chat_id):
     caption = (
         "📊 <b>To‘yona Hisoboti (Excel)</b>\n\n"
         f"💰 <b>Jami to‘yona:</b> {money_fmt(total_sum)}\n"
-        f"🥩 <b>Go‘sht ekvivalenti:</b> {kg_fmt(total_kg)}\n"
-        f"💵 <b>Bugungi qiymati:</b> {money_fmt(total_today_val)}\n"
+        f"🥩 <b>Go‘sht ekvivalenti:</b> {kg_fmt(total_kg)} (Bugun: {money_fmt(total_today_meat)})\n"
+        f"💵 <b>Dollar ekvivalenti:</b> {dollar_fmt(total_dollars)} (Bugun: {money_fmt(total_today_dollar)})\n"
         f"🎉 <b>To‘ylar:</b> {len(weddings_map)} ta | 👥 <b>Oshnalar:</b> {len(friends_map)} ta\n"
         f"📝 <b>Kiritilgan yozuvlar:</b> {len(gifts)} ta\n"
-        f"🍖 <b>Bugungi 1 kg narxi:</b> {money_fmt(current_price)}\n\n"
-        "📁 <i>Quyidagi Excel faylini ochsangiz, barcha to‘yona va oshnalar toza, tushunarli jadvalda ko‘rinadi!</i>"
+        f"🍖 <b>1 kg go‘sht:</b> {money_fmt(current_price)} | 💲 <b>1 $ kursi:</b> {money_fmt(current_dollar_rate)}\n\n"
+        "📁 <i>Quyidagi Excel faylini ochsangiz, barcha to‘yona va oshnalar Go‘sht va Dollar hisob-kitoblari bilan toza jadvalda ko‘rinadi!</i>"
     )
 
     ok = send_file_to_telegram(chat_id, xls_file, caption=caption)

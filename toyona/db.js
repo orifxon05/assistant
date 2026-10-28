@@ -57,6 +57,7 @@ async function initDb() {
     CREATE TABLE IF NOT EXISTS settings (
       telegram_id BIGINT PRIMARY KEY REFERENCES app_users(telegram_id) ON DELETE CASCADE,
       current_price BIGINT NOT NULL DEFAULT 150000 CHECK (current_price > 0),
+      current_dollar_rate BIGINT NOT NULL DEFAULT 12800 CHECK (current_dollar_rate > 0),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
@@ -75,6 +76,8 @@ async function initDb() {
       name TEXT NOT NULL,
       wedding_date DATE,
       meat_price BIGINT NOT NULL CHECK (meat_price > 0),
+      dollar_rate BIGINT NOT NULL DEFAULT 12800 CHECK (dollar_rate > 0),
+      calc_type TEXT NOT NULL DEFAULT 'both',
       min_kg NUMERIC(8,2) NOT NULL DEFAULT 2 CHECK (min_kg >= 0),
       note TEXT NOT NULL DEFAULT '',
       archived BOOLEAN NOT NULL DEFAULT FALSE,
@@ -89,11 +92,17 @@ async function initDb() {
       friend_id UUID NOT NULL REFERENCES friends(id) ON DELETE CASCADE,
       amount BIGINT NOT NULL CHECK (amount > 0),
       meat_price BIGINT NOT NULL CHECK (meat_price > 0),
+      dollar_rate BIGINT NOT NULL DEFAULT 12800 CHECK (dollar_rate > 0),
       note TEXT NOT NULL DEFAULT '',
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (wedding_id, friend_id)
     );
     CREATE INDEX IF NOT EXISTS gifts_owner_idx ON gifts(telegram_id);
+
+    ALTER TABLE settings ADD COLUMN IF NOT EXISTS current_dollar_rate BIGINT NOT NULL DEFAULT 12800;
+    ALTER TABLE weddings ADD COLUMN IF NOT EXISTS dollar_rate BIGINT NOT NULL DEFAULT 12800;
+    ALTER TABLE weddings ADD COLUMN IF NOT EXISTS calc_type TEXT NOT NULL DEFAULT 'both';
+    ALTER TABLE gifts ADD COLUMN IF NOT EXISTS dollar_rate BIGINT NOT NULL DEFAULT 12800;
   `);
 }
 

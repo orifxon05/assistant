@@ -127,7 +127,7 @@ const own = (table, id, owner) => query(`SELECT * FROM ${table} WHERE id=$1 AND 
 app.get('/api/bootstrap', asyncHandler(async (req, res) => {
   const owner = req.user.id;
   const [settings, friends, weddings, gifts] = await Promise.all([
-    query('SELECT current_price FROM settings WHERE telegram_id=$1', [owner]),
+    query('SELECT current_price, current_dollar_rate FROM settings WHERE telegram_id=$1', [owner]),
     query('SELECT * FROM friends WHERE telegram_id=$1 ORDER BY name COLLATE "C"', [owner]),
     query('SELECT * FROM weddings WHERE telegram_id=$1 ORDER BY wedding_date DESC NULLS LAST, created_at DESC', [owner]),
     query('SELECT * FROM gifts WHERE telegram_id=$1', [owner])
@@ -135,16 +135,42 @@ app.get('/api/bootstrap', asyncHandler(async (req, res) => {
   res.json({
     user: req.user,
     currentPrice: Number(settings.rows[0]?.current_price || 150000),
+    currentDollarRate: Number(settings.rows[0]?.current_dollar_rate || 12800),
     friends: friends.rows,
-    weddings: weddings.rows.map(w => ({...w, meat_price: Number(w.meat_price), min_kg: Number(w.min_kg)})),
-    gifts: gifts.rows.map(g => ({...g, amount: Number(g.amount), meat_price: Number(g.meat_price)}))
+    weddings: weddings.rows.map(w => ({
+      ...w,
+      meat_price: Number(w.meat_price),
+      dollar_rate: Number(w.dollar_rate || 12800),
+      calc_type: w.calc_type || 'both',
+      min_kg: Number(w.min_kg)
+    })),
+    gifts: gifts.rows.map(g => ({
+      ...g,
+      amount: Number(g.amount),
+      meat_price: Number(g.meat_price),
+      dollar_rate: Number(g.dollar_rate || 12800)
+    }))
   });
 }));
 
 app.put('/api/settings', asyncHandler(async (req, res) => {
-  const price = Number(req.body.currentPrice);
-  if (!Number.isSafeInteger(price) || price < 1) return res.status(400).json({ error: 'Narx musbat butun son bo‘lishi kerak.' });
-  await query('UPDATE settings SET current_price=$1, updated_at=NOW() WHERE telegram_id=$2', [price, req.user.id]);
+  const price = req.body.currentPrice !== undefined ? Number(req.body.currentPrice) : null;
+  const dollarRate = req.body.currentDollarRate !== undefined ? Number(req.body.currentDollarRate) : null;
+
+  if (price !== null && (!Number.isSafeInteger(price) || price < 1)) {
+    return res.status(400).json({ error: 'Go‘sht narxi musbat butun son bo‘lishi kerak.' });
+  }
+  if (dollarRate !== null && (!Number.isSafeInteger(dollarRate) || dollarRate < 1)) {
+    return res.status(400).json({ error: 'Dollar kursi musbat butun son bo‘lishi kerak.' });
+  }
+
+  if (price !== null && dollarRate !== null) {
+    await query('UPDATE settings SET current_price=$1, current_dollar_rate=$2, updated_at=NOW() WHERE telegram_id=$3', [price, dollarRate, req.user.id]);
+  } else if (price !== null) {
+    await query('UPDATE settings SET current_price=$1, updated_at=NOW() WHERE telegram_id=$2', [price, req.user.id]);
+  } else if (dollarRate !== null) {
+    await query('UPDATE settings SET current_dollar_rate=$1, updated_at=NOW() WHERE telegram_id=$2', [dollarRate, req.user.id]);
+  }
   res.json({ ok: true });
 }));
 
@@ -176,11 +202,13 @@ app.post('/api/weddings', asyncHandler(async (req, res) => {
   const name = String(req.body.name || '').trim();
   const rawDate = req.body.date ? String(req.body.date).trim() : null;
   const date = (rawDate && rawDate !== 'null' && rawDate !== 'undefined') ? rawDate : null;
-  const price = Number(req.body.meatPrice);
+  const price = Number(req.body.meatPrice || 150000);
+  const dollarRate = Number(req.body.dollarRate || 12800);
+  const calcType = ['both', 'meat', 'dollar'].includes(req.body.calcType) ? req.body.calcType : 'both';
   const minKg = Number(req.body.minKg ?? 2);
   const note = String(req.body.note || '').trim().slice(0, 500);
-  if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isFinite(minKg) || minKg < 0 || minKg > 100) {
-    return res.status(400).json({ error: 'To‘y nomi, narx yoki minimum qiymatini tekshiring.' });
+  if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(dollarRate) || dollarRate < 1 || !Number.isFinite(minKg) || minKg < 0 || minKg > 100) {
+    return res.status(400).json({ error: 'To‘y nomi, narx, dollar kursi yoki minimum qiymatini tekshiring.' });
   }
   if (friendId) {
     const f = await query('SELECT id FROM friends WHERE id=$1 AND telegram_id=$2', [friendId, req.user.id]);
@@ -188,8 +216,8 @@ app.post('/api/weddings', asyncHandler(async (req, res) => {
   }
   const id = randomUUID();
   await query(
-    'INSERT INTO weddings(id,telegram_id,friend_id,name,wedding_date,meat_price,min_kg,note) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
-    [id, req.user.id, friendId, name, date, price, minKg, note]
+    'INSERT INTO weddings(id,telegram_id,friend_id,name,wedding_date,meat_price,dollar_rate,calc_type,min_kg,note) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+    [id, req.user.id, friendId, name, date, price, dollarRate, calcType, minKg, note]
   );
   res.status(201).json({ id });
 }));
@@ -200,14 +228,18 @@ app.put('/api/weddings/:id', asyncHandler(async (req, res) => {
   const name = String(req.body.name || '').trim();
   const rawDate = req.body.date ? String(req.body.date).trim() : null;
   const date = (rawDate && rawDate !== 'null' && rawDate !== 'undefined') ? rawDate : null;
-  const price = Number(req.body.meatPrice);
-  const minKg = Number(req.body.minKg);
+  const price = Number(req.body.meatPrice || 150000);
+  const dollarRate = Number(req.body.dollarRate || 12800);
+  const calcType = ['both', 'meat', 'dollar'].includes(req.body.calcType) ? req.body.calcType : 'both';
+  const minKg = Number(req.body.minKg ?? 2);
   const note = String(req.body.note || '').trim().slice(0, 500);
-  if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isFinite(minKg) || minKg < 0 || minKg > 100) return res.status(400).json({ error: 'Maydonlarni tekshiring.' });
+  if (!name || name.length > 100 || !Number.isSafeInteger(price) || price < 1 || !Number.isSafeInteger(dollarRate) || dollarRate < 1 || !Number.isFinite(minKg) || minKg < 0 || minKg > 100) {
+    return res.status(400).json({ error: 'Maydonlarni tekshiring.' });
+  }
   const result = await query(
-    `UPDATE weddings SET name=$1,wedding_date=$2,meat_price=$3,min_kg=$4,friend_id=$5,note=$6
-     WHERE id=$7 AND telegram_id=$8 RETURNING id`,
-    [name,date,price,minKg,friendId, note, req.params.id, req.user.id]
+    `UPDATE weddings SET name=$1,wedding_date=$2,meat_price=$3,dollar_rate=$4,calc_type=$5,min_kg=$6,friend_id=$7,note=$8
+     WHERE id=$9 AND telegram_id=$10 RETURNING id`,
+    [name, date, price, dollarRate, calcType, minKg, friendId, note, req.params.id, req.user.id]
   );
   if (!result.rowCount) return res.status(404).json({ error: 'To‘y topilmadi.' });
   res.json({ ok: true });
@@ -229,7 +261,7 @@ app.put('/api/gifts', asyncHandler(async (req, res) => {
     return res.status(400).json({ error: 'To‘y yoki oshna ma’lumotlari to‘liq emas.' });
   }
   if (!Number.isSafeInteger(amount) || amount < 0) return res.status(400).json({ error: 'Summa 0 yoki musbat butun son bo‘lishi kerak.' });
-  const wedding = await query('SELECT meat_price FROM weddings WHERE id=$1 AND telegram_id=$2', [weddingId, req.user.id]);
+  const wedding = await query('SELECT meat_price, dollar_rate FROM weddings WHERE id=$1 AND telegram_id=$2', [weddingId, req.user.id]);
   const friend = await query('SELECT id FROM friends WHERE id=$1 AND telegram_id=$2', [friendId, req.user.id]);
   if (!wedding.rowCount || !friend.rowCount) return res.status(400).json({ error: 'To‘y yoki oshna topilmadi.' });
   if (amount === 0) {
@@ -237,12 +269,14 @@ app.put('/api/gifts', asyncHandler(async (req, res) => {
     return res.json({ ok: true, deleted: true });
   }
   const id = randomUUID();
+  const wMeatPrice = Number(wedding.rows[0].meat_price || 150000);
+  const wDollarRate = Number(wedding.rows[0].dollar_rate || 12800);
   await query(
-    `INSERT INTO gifts(id,telegram_id,wedding_id,friend_id,amount,meat_price,note)
-     VALUES($1,$2,$3,$4,$5,$6,$7)
-     ON CONFLICT(wedding_id,friend_id) DO UPDATE SET amount=EXCLUDED.amount,note=EXCLUDED.note,updated_at=NOW()
+    `INSERT INTO gifts(id,telegram_id,wedding_id,friend_id,amount,meat_price,dollar_rate,note)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT(wedding_id,friend_id) DO UPDATE SET amount=EXCLUDED.amount,meat_price=EXCLUDED.meat_price,dollar_rate=EXCLUDED.dollar_rate,note=EXCLUDED.note,updated_at=NOW()
      WHERE gifts.telegram_id=EXCLUDED.telegram_id`,
-    [id, req.user.id, weddingId, friendId, amount, Number(wedding.rows[0].meat_price), note]
+    [id, req.user.id, weddingId, friendId, amount, wMeatPrice, wDollarRate, note]
   );
   res.json({ ok: true });
 }));
@@ -315,23 +349,32 @@ app.post('/api/restore', asyncHandler(async (req, res) => {
 
 function buildToyonaReport(settings, friends, weddings, gifts) {
   const currentPrice = Number(settings.rows[0]?.current_price || 150000);
+  const currentDollarRate = Number(settings.rows[0]?.current_dollar_rate || 12800);
   const moneyFmt = n => Math.round(Number(n) || 0).toLocaleString('uz-UZ').replace(/,/g, ' ') + ' so‘m';
   const kgFmt = n => (Math.round((Number(n) || 0) * 10) / 10).toLocaleString('uz-UZ') + ' kg';
+  const dollarFmt = n => '$ ' + (Math.round((Number(n) || 0) * 10) / 10).toLocaleString('uz-UZ');
   const dateFmt = d => d ? new Date(String(d).slice(0, 10) + 'T12:00:00').toLocaleDateString('uz-UZ', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
 
   let totalSum = 0;
   let totalKg = 0;
-  let totalTodayValue = 0;
+  let totalDollars = 0;
+  let totalTodayMeatVal = 0;
+  let totalTodayDollarVal = 0;
 
   const rowsData = gifts.rows.map((r, idx) => {
     const amount = Number(r.amount || 0);
     const meatPriceAtGift = Number(r.gift_price || r.wedding_price || currentPrice);
+    const dollarRateAtGift = Number(r.gift_dollar_rate || r.wedding_dollar_rate || currentDollarRate);
     const kg = meatPriceAtGift > 0 ? (amount / meatPriceAtGift) : 0;
-    const todayVal = Math.round(kg * currentPrice);
+    const dollars = dollarRateAtGift > 0 ? (amount / dollarRateAtGift) : 0;
+    const todayMeatVal = Math.round(kg * currentPrice);
+    const todayDollarVal = Math.round(dollars * currentDollarRate);
 
     totalSum += amount;
     totalKg += kg;
-    totalTodayValue += todayVal;
+    totalDollars += dollars;
+    totalTodayMeatVal += todayMeatVal;
+    totalTodayDollarVal += todayDollarVal;
 
     return {
       num: idx + 1,
@@ -342,8 +385,12 @@ function buildToyonaReport(settings, friends, weddings, gifts) {
       amountFmt: moneyFmt(amount),
       kg,
       kgFmt: kgFmt(kg),
-      todayVal,
-      todayValFmt: moneyFmt(todayVal),
+      dollars,
+      dollarFmt: dollarFmt(dollars),
+      todayMeatVal,
+      todayMeatValFmt: moneyFmt(todayMeatVal),
+      todayDollarVal,
+      todayDollarValFmt: moneyFmt(todayDollarVal),
       note: r.note || '-'
     };
   });
@@ -355,17 +402,21 @@ function buildToyonaReport(settings, friends, weddings, gifts) {
       date: dateFmt(w.wedding_date),
       count: 0,
       sum: 0,
-      kg: 0
+      kg: 0,
+      dollars: 0
     };
   }
   for (const g of gifts.rows) {
     if (weddingMap[g.wedding_id]) {
       const a = Number(g.amount || 0);
       const p = Number(g.gift_price || g.wedding_price || currentPrice);
+      const d = Number(g.gift_dollar_rate || g.wedding_dollar_rate || currentDollarRate);
       const k = p > 0 ? (a / p) : 0;
+      const dl = d > 0 ? (a / d) : 0;
       weddingMap[g.wedding_id].count++;
       weddingMap[g.wedding_id].sum += a;
       weddingMap[g.wedding_id].kg += k;
+      weddingMap[g.wedding_id].dollars += dl;
     }
   }
   const weddingSummary = Object.values(weddingMap).sort((a, b) => b.sum - a.sum);
@@ -379,10 +430,12 @@ function buildToyonaReport(settings, friends, weddings, gifts) {
       <td style="text-align:center;">${r.date}</td>
       <td style="text-align:right;">${r.amountFmt}</td>
       <td style="text-align:right;">${r.kgFmt}</td>
-      <td style="text-align:right;">${r.todayValFmt}</td>
+      <td style="text-align:right;">${r.dollarFmt}</td>
+      <td style="text-align:right;">${r.todayMeatValFmt}</td>
+      <td style="text-align:right;">${r.todayDollarValFmt}</td>
       <td>${r.note}</td>
     </tr>
-  `).join('') : `<tr><td colspan="8" style="text-align:center;color:#888;padding:15px;">To‘yona yozuvlari kiritilmagan</td></tr>`;
+  `).join('') : `<tr><td colspan="10" style="text-align:center;color:#888;padding:15px;">To‘yona yozuvlari kiritilmagan</td></tr>`;
 
   const weddingRowsHtml = weddingSummary.length ? weddingSummary.map((w, idx) => `
     <tr>
@@ -392,8 +445,9 @@ function buildToyonaReport(settings, friends, weddings, gifts) {
       <td style="text-align:center;">${w.count} kishi</td>
       <td style="text-align:right;">${moneyFmt(w.sum)}</td>
       <td style="text-align:right;">${kgFmt(w.kg)}</td>
+      <td style="text-align:right;">${dollarFmt(w.dollars)}</td>
     </tr>
-  `).join('') : `<tr><td colspan="6" style="text-align:center;color:#888;padding:15px;">To‘ylar mavjud emas</td></tr>`;
+  `).join('') : `<tr><td colspan="7" style="text-align:center;color:#888;padding:15px;">To‘ylar mavjud emas</td></tr>`;
 
   const excelHtml = `\uFEFF<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
 <head>
@@ -425,28 +479,32 @@ function buildToyonaReport(settings, friends, weddings, gifts) {
 </head>
 <body>
   <h2 style="color:#0d785b;margin:0 0 4px;font-size:16pt;">💒 TO‘YONA HISOBOTI</h2>
-  <p style="margin:0 0 16px;color:#556;font-size:10pt;">Tayyorlangan sana: <b>${todayDateStr}</b> | Bugungi 1 kg go‘sht narxi: <b>${moneyFmt(currentPrice)}</b></p>
+  <p style="margin:0 0 16px;color:#556;font-size:10pt;">Tayyorlangan sana: <b>${todayDateStr}</b> | Bugungi 1 kg go‘sht: <b>${moneyFmt(currentPrice)}</b> | Bugungi 1 $ kursi: <b>${moneyFmt(currentDollarRate)}</b></p>
 
   <table>
     <tr><th colspan="2" class="head-sec">📊 1. UMUMIY KO‘RSATKICHLAR</th></tr>
     <tr><td class="summary-lbl">Jami yig‘ilgan to‘yona summasi:</td><td class="summary-val">${moneyFmt(totalSum)}</td></tr>
-    <tr><td class="summary-lbl">Jami go‘sht ekvivalenti:</td><td class="summary-val">${kgFmt(totalKg)}</td></tr>
-    <tr><td class="summary-lbl">Bugungi narxdagi umumiy qiymati:</td><td class="summary-val">${moneyFmt(totalTodayValue)}</td></tr>
+    <tr><td class="summary-lbl">Jami go‘sht ekvivalenti:</td><td class="summary-val">${kgFmt(totalKg)} (Bugungi qiymati: ${moneyFmt(totalTodayMeatVal)})</td></tr>
+    <tr><td class="summary-lbl">Jami dollar ekvivalenti:</td><td class="summary-val">${dollarFmt(totalDollars)} (Bugungi kursda: ${moneyFmt(totalTodayDollarVal)})</td></tr>
+    <tr><td class="summary-lbl">Bugungi 1 kg go‘sht narxi:</td><td>${moneyFmt(currentPrice)}</td></tr>
+    <tr><td class="summary-lbl">Bugungi 1 $ dollari kursi:</td><td>${moneyFmt(currentDollarRate)}</td></tr>
     <tr><td class="summary-lbl">Jami to‘ylar soni:</td><td>${weddings.rows.length} ta</td></tr>
     <tr><td class="summary-lbl">Jami oshnalar soni:</td><td>${friends.rows.length} ta</td></tr>
     <tr><td class="summary-lbl">Kiritilgan to‘yona yozuvlari:</td><td>${gifts.rows.length} ta</td></tr>
   </table>
 
   <table>
-    <tr><th colspan="8" class="head-sec">📋 2. BARCHA TO‘YONALARNING BATAFSIL RO‘YXATI</th></tr>
+    <tr><th colspan="10" class="head-sec">📋 2. BARCHA TO‘YONALARNING BATAFSIL RO‘YXATI</th></tr>
     <tr>
-      <th style="width:45px;text-align:center;">№</th>
+      <th style="width:40px;text-align:center;">№</th>
       <th style="text-align:left;">Oshna (Do‘st ismi)</th>
       <th style="text-align:left;">Qaysi to‘y</th>
       <th style="text-align:center;">To‘y sanasi</th>
       <th style="text-align:right;">Berilgan to‘yona</th>
-      <th style="text-align:right;">Go‘sht miqdori</th>
-      <th style="text-align:right;">Bugungi qiymati</th>
+      <th style="text-align:right;">Go‘sht (kg)</th>
+      <th style="text-align:right;">Dollar ($)</th>
+      <th style="text-align:right;">Bugun (Go‘sht)</th>
+      <th style="text-align:right;">Bugun (Dollar)</th>
       <th style="text-align:left;">Izoh</th>
     </tr>
     ${giftRowsHtml}
@@ -454,20 +512,23 @@ function buildToyonaReport(settings, friends, weddings, gifts) {
       <td colspan="4" style="text-align:right;">JAMI:</td>
       <td style="text-align:right;">${moneyFmt(totalSum)}</td>
       <td style="text-align:right;">${kgFmt(totalKg)}</td>
-      <td style="text-align:right;">${moneyFmt(totalTodayValue)}</td>
+      <td style="text-align:right;">${dollarFmt(totalDollars)}</td>
+      <td style="text-align:right;">${moneyFmt(totalTodayMeatVal)}</td>
+      <td style="text-align:right;">${moneyFmt(totalTodayDollarVal)}</td>
       <td></td>
     </tr>
   </table>
 
   <table>
-    <tr><th colspan="6" class="head-sec">🎉 3. TO‘YLAR BO‘YICHA JAMLANMA</th></tr>
+    <tr><th colspan="7" class="head-sec">🎉 3. TO‘YLAR BO‘YICHA JAMLANMA</th></tr>
     <tr>
-      <th style="width:45px;text-align:center;">№</th>
+      <th style="width:40px;text-align:center;">№</th>
       <th style="text-align:left;">To‘y nomi</th>
       <th style="text-align:center;">Sanasi</th>
       <th style="text-align:center;">To‘yona berganlar</th>
       <th style="text-align:right;">Jami summa</th>
-      <th style="text-align:right;">Jami go‘sht ekv.</th>
+      <th style="text-align:right;">Go‘sht ekv.</th>
+      <th style="text-align:right;">Dollar ekv.</th>
     </tr>
     ${weddingRowsHtml}
   </table>
@@ -476,7 +537,7 @@ function buildToyonaReport(settings, friends, weddings, gifts) {
 
   const cell = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
   const csvLines = [
-    ['№', 'Oshna (Do‘st ismi)', 'Qaysi to‘y', 'To‘y sanasi', 'Berilgan to‘yona (so‘m)', 'Go‘sht miqdori (kg)', 'Bugungi qiymati (so‘m)', 'Izoh'],
+    ['№', 'Oshna (Do‘st ismi)', 'Qaysi to‘y', 'To‘y sanasi', 'Berilgan to‘yona (so‘m)', 'Go‘sht (kg)', 'Dollar ($)', 'Bugungi narxda (Go‘sht)', 'Bugungi kursda (Dollar)', 'Izoh'],
     ...rowsData.map(r => [
       r.num,
       r.friend,
@@ -484,35 +545,37 @@ function buildToyonaReport(settings, friends, weddings, gifts) {
       r.date,
       r.amountFmt,
       r.kgFmt,
-      r.todayValFmt,
+      r.dollarFmt,
+      r.todayMeatValFmt,
+      r.todayDollarValFmt,
       r.note
     ]),
-    ['JAMI', '', '', '', moneyFmt(totalSum), kgFmt(totalKg), moneyFmt(totalTodayValue), '']
+    ['JAMI', '', '', '', moneyFmt(totalSum), kgFmt(totalKg), dollarFmt(totalDollars), moneyFmt(totalTodayMeatVal), moneyFmt(totalTodayDollarVal), '']
   ];
   const csvContent = '\uFEFF' + csvLines.map(row => row.map(cell).join(';')).join('\r\n');
 
   const caption = (
     "📊 <b>To‘yona Hisoboti (Excel)</b>\n\n" +
     `💰 <b>Jami to‘yona:</b> ${moneyFmt(totalSum)}\n` +
-    `🥩 <b>Go‘sht ekvivalenti:</b> ${kgFmt(totalKg)}\n` +
-    `💵 <b>Bugungi qiymati:</b> ${moneyFmt(totalTodayValue)}\n` +
+    `🥩 <b>Go‘sht ekvivalenti:</b> ${kgFmt(totalKg)} (Bugun: ${moneyFmt(totalTodayMeatVal)})\n` +
+    `💵 <b>Dollar ekvivalenti:</b> ${dollarFmt(totalDollars)} (Bugun: ${moneyFmt(totalTodayDollarVal)})\n` +
     `🎉 <b>To‘ylar:</b> ${weddings.rows.length} ta | 👥 <b>Oshnalar:</b> ${friends.rows.length} ta\n` +
     `📝 <b>Kiritilgan yozuvlar:</b> ${gifts.rows.length} ta\n` +
-    `🍖 <b>Bugungi 1 kg narxi:</b> ${moneyFmt(currentPrice)}\n\n` +
-    "📁 <i>Quyidagi Excel faylini ochsangiz, barcha to‘yona va oshnalar toza, tushunarli jadvalda ko‘rinadi!</i>"
+    `🍖 <b>1 kg go‘sht:</b> ${moneyFmt(currentPrice)} | 💲 <b>1 $ kursi:</b> ${moneyFmt(currentDollarRate)}\n\n` +
+    "📁 <i>Quyidagi Excel faylini ochsangiz, barcha to‘yona va oshnalar Go‘sht va Dollar hisob-kitoblari bilan toza jadvalda ko‘rinadi!</i>"
   );
 
-  return { excelHtml, csvContent, caption, totalSum, totalKg, totalTodayValue };
+  return { excelHtml, csvContent, caption, totalSum, totalKg, totalDollars, totalTodayMeatVal, totalTodayDollarVal };
 }
 
 async function fetchReportData(owner) {
   return await Promise.all([
-    query('SELECT current_price FROM settings WHERE telegram_id=$1', [owner]),
+    query('SELECT current_price, current_dollar_rate FROM settings WHERE telegram_id=$1', [owner]),
     query('SELECT * FROM friends WHERE telegram_id=$1 ORDER BY name COLLATE "C"', [owner]),
     query('SELECT * FROM weddings WHERE telegram_id=$1 ORDER BY wedding_date DESC NULLS LAST, created_at DESC', [owner]),
     query(`
-      SELECT w.name AS wedding, w.wedding_date, w.meat_price AS wedding_price,
-             f.name AS friend, g.wedding_id, g.amount, g.meat_price AS gift_price, g.note
+      SELECT w.name AS wedding, w.wedding_date, w.meat_price AS wedding_price, w.dollar_rate AS wedding_dollar_rate,
+             f.name AS friend, g.wedding_id, g.amount, g.meat_price AS gift_price, g.dollar_rate AS gift_dollar_rate, g.note
       FROM gifts g
       JOIN weddings w ON w.id=g.wedding_id
       JOIN friends f ON f.id=g.friend_id

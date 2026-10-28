@@ -48,7 +48,7 @@
 
   applyTheme(getPreferredTheme());
 
-  const state = { user:null, currentPrice:150000, friends:[], weddings:[], gifts:[], page:'home', query:'', selectedWedding:null, selectedFriend:null, busy:false };
+  const state = { user:null, currentPrice:150000, currentDollarRate:12800, friends:[], weddings:[], gifts:[], page:'home', query:'', selectedWedding:null, selectedFriend:null, busy:false };
   const app = document.getElementById('app');
   const modal = document.getElementById('modal');
   const modalBody = document.getElementById('modalBody');
@@ -69,6 +69,7 @@
     return Math.round(n).toLocaleString('uz-UZ').replace(/,/g,' ');
   };
   const kg = n => (Math.round((Number(n)||0)*10)/10).toLocaleString('uz-UZ');
+  const dollar = n => '$ ' + (Math.round((Number(n)||0)*10)/10).toLocaleString('uz-UZ');
   const dateText = d => d ? new Date(String(d).slice(0,10)+'T12:00:00').toLocaleDateString('uz-UZ',{day:'numeric',month:'short',year:'numeric'}) : 'Sana kiritilmagan';
   const friend = id => state.friends.find(x=>x.id===id);
   const wedding = id => state.weddings.find(x=>x.id===id);
@@ -76,9 +77,12 @@
   const weddingGifts = wid => state.gifts.filter(g=>g.wedding_id===wid);
   const amount = (wid,fid) => Number(gift(wid,fid)?.amount||0);
   const meatPrice = w => Number(w?.meat_price||state.currentPrice);
+  const dollarRate = w => Number(w?.dollar_rate||state.currentDollarRate||12800);
   const meatKg = g => Number(g.amount||0) / Number(g.meat_price||state.currentPrice);
+  const dollarKg = g => Number(g.amount||0) / Number(g.dollar_rate||state.currentDollarRate||12800);
   const allGiftSum = () => state.gifts.reduce((s,g)=>s+Number(g.amount||0),0);
   const allGiftKg = () => state.gifts.reduce((s,g)=>s+meatKg(g),0);
+  const allGiftDollars = () => state.gifts.reduce((s,g)=>s+dollarKg(g),0);
 
   function promptAccessKey() {
     openModal('🔑 Kirish kalitini kiriting', `
@@ -164,24 +168,64 @@
   function weddingTotal(w) { return weddingGifts(w.id).reduce((s,g)=>s+Number(g.amount),0); }
 
   function weddingCard(w) {
-    const gs = weddingGifts(w.id), total = weddingTotal(w), count = gs.length, kgTotal = gs.reduce((s,g)=>s+meatKg(g),0);
-    return `<button class="card list-card" data-action="open-wedding" data-id="${w.id}"><div class="card-row"><div><div class="card-title">${esc(w.name)} to‘yi</div><div class="muted">${dateText(w.wedding_date)} · ${money(meatPrice(w))}/kg</div></div><span class="tag">${count}/${state.friends.length}</span></div><div class="card-row" style="margin-top:12px"><div><div class="amount">${compactMoney(total)} <span class="muted">so‘m</span></div><div class="muted">${kg(kgTotal)} kg ekvivalent</div></div><span class="green">Batafsil ›</span></div><div class="progress"><span style="width:${state.friends.length?Math.min(100,count/state.friends.length*100):0}%"></span></div></button>`;
+    const gs = weddingGifts(w.id), total = weddingTotal(w), count = gs.length;
+    const kgTotal = gs.reduce((s,g)=>s+meatKg(g),0);
+    const dlTotal = gs.reduce((s,g)=>s+dollarKg(g),0);
+    const dRate = dollarRate(w);
+    return `<button class="card list-card" data-action="open-wedding" data-id="${w.id}">
+      <div class="card-row">
+        <div>
+          <div class="card-title">${esc(w.name)} to‘yi</div>
+          <div class="muted">${dateText(w.wedding_date)} · ${money(meatPrice(w))}/kg · 1$=${compactMoney(dRate)}</div>
+        </div>
+        <span class="tag">${count}/${state.friends.length}</span>
+      </div>
+      <div class="card-row" style="margin-top:12px">
+        <div>
+          <div class="amount">${compactMoney(total)} <span class="muted">so‘m</span></div>
+          <div class="muted">🥩 ${kg(kgTotal)} kg · 💵 ${dollar(dlTotal)}</div>
+        </div>
+        <span class="green">Batafsil ›</span>
+      </div>
+      <div class="progress"><span style="width:${state.friends.length?Math.min(100,count/state.friends.length*100):0}%"></span></div>
+    </button>`;
   }
 
   function friendStats(f) {
     const gifts = state.gifts.filter(g=>g.friend_id===f.id);
-    return {gifts, total:gifts.reduce((s,g)=>s+Number(g.amount),0), kg:gifts.reduce((s,g)=>s+meatKg(g),0)};
+    return {
+      gifts,
+      total: gifts.reduce((s,g)=>s+Number(g.amount),0),
+      kg: gifts.reduce((s,g)=>s+meatKg(g),0),
+      dollars: gifts.reduce((s,g)=>s+dollarKg(g),0)
+    };
   }
 
   function friendCard(f) {
     const s = friendStats(f);
-    return `<button class="card list-card" data-action="open-friend" data-id="${f.id}"><div class="card-row"><div><div class="card-title">${esc(f.name)}</div><div class="muted">${s.gifts.length} ta to‘yda qatnashgan</div></div><div class="right"><div class="amount">${kg(s.kg)} kg</div><div class="muted">jami ekvivalent</div></div></div></button>`;
+    return `<button class="card list-card" data-action="open-friend" data-id="${f.id}">
+      <div class="card-row">
+        <div>
+          <div class="card-title">${esc(f.name)}</div>
+          <div class="muted">${s.gifts.length} ta to‘yda qatnashgan</div>
+        </div>
+        <div class="right">
+          <div class="amount">${kg(s.kg)} kg</div>
+          <div class="muted">${dollar(s.dollars)}</div>
+        </div>
+      </div>
+    </button>`;
   }
 
   function homePage() {
     const recent = [...state.weddings].slice(0, 3);
     return `<section class="hero"><div class="eyebrow">BARCHA TO‘YONALAR</div><div class="hero-total">${money(allGiftSum())}</div><div class="hero-sub">Kiritilgan to‘yonalarning umumiy summasi</div><div class="hero-grid"><div class="hero-mini"><b>${state.weddings.length}</b><span>Jami to‘ylar</span></div><div class="hero-mini"><b>${state.friends.length}</b><span>Oshnalar</span></div></div></section>
-      ${stats([{value:kg(allGiftKg())+' kg',label:'Jami go‘sht ekvivalenti'},{value:state.gifts.length,label:'To‘yona yozuvlari'},{value:money(state.currentPrice),label:'Bugungi 1 kg narxi'}])}
+      ${stats([
+        {value:kg(allGiftKg())+' kg',label:'🥩 Jami go‘sht'},
+        {value:dollar(allGiftDollars()),label:'💵 Jami dollar'},
+        {value:money(state.currentPrice),label:'1 kg go‘sht'},
+        {value:money(state.currentDollarRate),label:'1 $ kursi'}
+      ])}
       ${section('So‘nggi to‘ylar','',button('+ To‘y qo‘shish','add-wedding','primary small'))}
       ${recent.length?`<div class="list">${recent.map(weddingCard).join('')}</div>`:empty('🤝','Hali to‘y qo‘shilmagan','Birinchi to‘yni qo‘shib, to‘yona hisobini yuritishni boshlang.',button('Birinchi to‘y +','add-wedding'))}
       ${section('Tezkor amallar')}
@@ -210,16 +254,40 @@
     const w = wedding(id);
     if (!w) { state.selectedWedding=null; return weddingsPage(); }
     const gs = weddingGifts(id), total = weddingTotal(w), minAmount = Math.round(Number(w.min_kg)*meatPrice(w));
+    const dRate = dollarRate(w);
+    const kgTotal = gs.reduce((s,g)=>s+meatKg(g),0);
+    const dlTotal = gs.reduce((s,g)=>s+dollarKg(g),0);
+
     const list = state.friends.map(f => {
       const g = gift(id, f.id), a = Number(g?.amount || 0);
       const ownerId = w.friend_id;
       const historicalKg = ownerId ? state.gifts.filter(x=>x.friend_id===ownerId && wedding(x.wedding_id)?.friend_id===f.id).reduce((s,x)=>s+meatKg(x),0) : 0;
       const due = Math.max(0, historicalKg*state.currentPrice - a);
-      return `<div class="card" id="gift-card-${f.id}"><div class="gift-row"><div><div class="gift-name" id="gift-name-${f.id}">${a?'<span class="green">✓</span> ':''}${esc(f.name)}</div><div class="gift-kg" id="gift-kg-${f.id}">${a?`${kg(meatKg(g))} kg · ${money(a)}`:'Hali kiritilmagan'}</div>${a>0&&a<minAmount?'<div class="muted" style="color:var(--orange);margin-top:4px">Minimumdan kam</div>':''}${due>0?`<div class="debt-line">Oldingi to‘yonalar bo‘yicha taxminiy tavsiya: ${money(due)} <button class="btn secondary small" data-action="fill-due" data-friend="${f.id}" data-wedding="${id}" data-amount="${Math.round(due)}">Summani yozish</button></div>`:''}</div><input class="gift-input" inputmode="numeric" type="number" min="0" step="1000" placeholder="So‘m" aria-label="${esc(f.name)} to‘yonasi" data-gift-input data-wedding="${id}" data-friend="${f.id}" value="${a||''}"></div></div>`;
+      const itemKg = a ? meatKg(g) : 0;
+      const itemDl = a ? dollarKg(g) : 0;
+
+      return `<div class="card" id="gift-card-${f.id}">
+        <div class="gift-row">
+          <div>
+            <div class="gift-name" id="gift-name-${f.id}">${a?'<span class="green">✓</span> ':''}${esc(f.name)}</div>
+            <div class="gift-kg" id="gift-kg-${f.id}">${a?`🥩 <b>${kg(itemKg)} kg</b> · 💵 <b>${dollar(itemDl)}</b> · ${money(a)}`:'Hali kiritilmagan'}</div>
+            ${a>0&&a<minAmount?'<div class="muted" style="color:var(--orange);margin-top:4px">Minimumdan kam</div>':''}
+            ${due>0?`<div class="debt-line">Oldingi to‘yonalar bo‘yicha tavsiya: ${money(due)} <button class="btn secondary small" data-action="fill-due" data-friend="${f.id}" data-wedding="${id}" data-amount="${Math.round(due)}">Summani yozish</button></div>`:''}
+          </div>
+          <input class="gift-input" inputmode="numeric" type="number" min="0" step="1000" placeholder="So‘m" aria-label="${esc(f.name)} to‘yonasi" data-gift-input data-wedding="${id}" data-friend="${f.id}" value="${a||''}">
+        </div>
+      </div>`;
     }).join('');
 
-    return `<button class="btn secondary small" data-action="back-weddings">‹ To‘ylar</button><div class="section-head"><h2>${esc(w.name)} to‘yi</h2></div><p class="page-sub">${dateText(w.wedding_date)} · ${money(meatPrice(w))}/kg · minimum ${kg(w.min_kg)} kg (${money(minAmount)})</p>
-      <div id="wedding-stats-box">${stats([{value:compactMoney(total),label:'Jami so‘m'},{value:kg(gs.reduce((s,g)=>s+meatKg(g),0))+' kg',label:'Go‘sht ekvivalenti'},{value:`${gs.length}/${state.friends.length}`,label:'To‘yona bergan'}])}</div>
+    return `<button class="btn secondary small" data-action="back-weddings">‹ To‘ylar</button>
+      <div class="section-head"><h2>${esc(w.name)} to‘yi</h2></div>
+      <p class="page-sub">${dateText(w.wedding_date)} · 🥩 ${money(meatPrice(w))}/kg · 💵 1 $ = ${money(dRate)} · min ${kg(w.min_kg)} kg</p>
+      <div id="wedding-stats-box">${stats([
+        {value:compactMoney(total),label:'Jami so‘m'},
+        {value:kg(kgTotal)+' kg',label:'🥩 Go‘sht ekv.'},
+        {value:dollar(dlTotal),label:'💵 Dollar ekv.'},
+        {value:`${gs.length}/${state.friends.length}`,label:'To‘yona bergan'}
+      ])}</div>
       <div class="action-row">${button('✎ To‘yni tahrirlash','edit-wedding','secondary')}${button('O‘chirish','delete-wedding','danger')}</div>
       <div class="section-head"><h2>To‘yona ro‘yxati</h2><button class="btn secondary small" data-action="add-friend">+ Oshna qo‘shish</button></div>
       ${state.friends.length?list:empty('♙','Oshnalar yo‘q','Avval Oshnalar qo‘shing.',button('+ Oshna qo‘shish','add-friend'))}
@@ -230,26 +298,74 @@
     const f = friend(id);
     if (!f) { state.selectedFriend=null; return friendsPage(); }
     const gs = state.gifts.filter(g=>g.friend_id===id).sort((a,b)=>String(wedding(b.wedding_id)?.wedding_date||'').localeCompare(String(wedding(a.wedding_id)?.wedding_date||'')));
-    const kgTotal = gs.reduce((s,g)=>s+meatKg(g),0), total = gs.reduce((s,g)=>s+Number(g.amount),0);
-    const due = kgTotal * state.currentPrice;
-    return `<button class="btn secondary small" data-action="back-friends">‹ Oshnalar</button><div class="section-head"><h2>${esc(f.name)}</h2></div>
-      ${stats([{value:money(total),label:'Jami bergan'},{value:kg(kgTotal)+' kg',label:'Go‘sht ekvivalenti'},{value:money(due),label:'Bugungi narxda'}])}
+    const kgTotal = gs.reduce((s,g)=>s+meatKg(g),0);
+    const dlTotal = gs.reduce((s,g)=>s+dollarKg(g),0);
+    const total = gs.reduce((s,g)=>s+Number(g.amount),0);
+    const dueMeat = Math.round(kgTotal * state.currentPrice);
+    const dueDollar = Math.round(dlTotal * state.currentDollarRate);
+
+    return `<button class="btn secondary small" data-action="back-friends">‹ Oshnalar</button>
+      <div class="section-head"><h2>${esc(f.name)}</h2></div>
+      ${stats([
+        {value:money(total),label:'Jami bergan'},
+        {value:kg(kgTotal)+' kg',label:'🥩 Go‘sht ekv.'},
+        {value:dollar(dlTotal),label:'💵 Dollar ekv.'}
+      ])}
       <div class="action-row">${button('✎ Ismni tahrirlash','edit-friend','secondary')}${button('O‘chirish','delete-friend','danger')}</div>
-      <div class="card"><div class="field"><label>Bugungi 1 kg go‘sht narxi (so‘m)</label><input type="number" min="1" step="1000" id="currentPriceInput" value="${state.currentPrice}"></div><p class="note">Bu narx faqat taxminiy qaytarish qiymatini ko‘rsatadi. Eski yozuvlar o‘z tarixiy narxida qoladi.</p><div class="card-row"><b>Taxminiy qaytarish qiymati</b><b class="amount">${money(due)}</b></div></div>
+      <div class="card">
+        <div class="card-title">⚙️ Bugungi hisob-kitob narx va kurslari</div>
+        <p class="muted">Ushbu narxlar taxminiy qaytarish qiymatlarini ko‘rsatadi. Eski yozuvlar o‘z tarixiy narxida qoladi.</p>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field">
+            <label>1 kg go‘sht narxi (so‘m)</label>
+            <input type="number" min="1" step="1000" id="currentPriceInput" value="${state.currentPrice}">
+          </div>
+          <div class="field">
+            <label>1 $ dollari kursi (so‘m)</label>
+            <input type="number" min="1" step="100" id="currentDollarInput" value="${state.currentDollarRate}">
+          </div>
+        </div>
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">
+          <div class="card-row"><b>🥩 Go‘sht bo‘yicha qaytarish qiymati:</b><b class="amount">${money(dueMeat)}</b></div>
+          <div class="card-row"><b>💵 Dollar kursi bo‘yicha qaytarish qiymati:</b><b class="amount">${money(dueDollar)} (${dollar(dlTotal)})</b></div>
+        </div>
+      </div>
       ${section('To‘yona tarixi',`${gs.length} ta yozuv`)}
-      ${gs.length?`<div class="list">${gs.map(g=>{const w=wedding(g.wedding_id);return w?`<div class="card"><div class="card-row"><div><div class="card-title">${esc(w.name)} to‘yi</div><div class="muted">${dateText(w.wedding_date)}</div></div><div class="right"><div class="amount">${money(g.amount)}</div><div class="muted">${kg(meatKg(g))} kg</div></div></div><button class="btn secondary small" style="margin-top:10px" data-action="open-wedding" data-id="${w.id}">Yozuvni ko‘rish</button></div>`:''}).join('')}</div>`:empty('🧾','Hali to‘yona yozilmagan','Bu oshna uchun to‘yona kiritilmagan.')}`;
+      ${gs.length?`<div class="list">${gs.map(g=>{
+        const w=wedding(g.wedding_id);
+        return w?`<div class="card"><div class="card-row"><div><div class="card-title">${esc(w.name)} to‘yi</div><div class="muted">${dateText(w.wedding_date)}</div></div><div class="right"><div class="amount">${money(g.amount)}</div><div class="muted">🥩 ${kg(meatKg(g))} kg · 💵 ${dollar(dollarKg(g))}</div></div></div><button class="btn secondary small" style="margin-top:10px" data-action="open-wedding" data-id="${w.id}">Yozuvni ko‘rish</button></div>`:''
+      }).join('')}</div>`:empty('🧾','Hali to‘yona yozilmagan','Bu oshna uchun to‘yona kiritilmagan.')}`;
   }
 
   function reportsPage() {
     const totalsByWedding = state.weddings.map(w=>({w,total:weddingTotal(w),count:weddingGifts(w.id).length})).sort((a,b)=>b.total-a.total);
     return `<h2 class="page-title">Hisobot</h2><p class="page-sub">Umumiy ko‘rsatkichlar va Excel/Telegram hisobotlari.</p>
-      ${stats([{value:money(allGiftSum()),label:'Jami to‘yona'},{value:kg(allGiftKg())+' kg',label:'Jami kg ekv.'},{value:state.gifts.length,label:'Yozuvlar'}])}
-      <div class="card"><div class="card-title">Bugungi go‘sht narxi</div><p class="muted">Taxminiy qaytarish qiymatlarini hisoblash uchun ishlatiladi.</p><div class="field" style="margin-top:12px"><input id="reportPrice" type="number" min="1" step="1000" value="${state.currentPrice}"></div>${button('Narxni saqlash','save-price','primary full')}</div>
+      ${stats([
+        {value:money(allGiftSum()),label:'Jami to‘yona'},
+        {value:kg(allGiftKg())+' kg',label:'🥩 Jami go‘sht'},
+        {value:dollar(allGiftDollars()),label:'💵 Jami dollar'},
+        {value:state.gifts.length,label:'Yozuvlar'}
+      ])}
+      <div class="card">
+        <div class="card-title">⚙️ Bugungi go‘sht narxi va dollar kursi</div>
+        <p class="muted">Taxminiy qaytarish qiymatlarini hisoblash uchun ishlatiladi. O‘zingiz istagan narx va kursni kiritishingiz mumkin.</p>
+        <div class="form-grid" style="margin-top:12px">
+          <div class="field">
+            <label>1 kg go‘sht narxi (so‘m)</label>
+            <input id="reportPrice" type="number" min="1" step="1000" value="${state.currentPrice}">
+          </div>
+          <div class="field">
+            <label>1 $ dollari kursi (so‘m)</label>
+            <input id="reportDollar" type="number" min="1" step="100" value="${state.currentDollarRate}">
+          </div>
+        </div>
+        ${button('Narx va kursni saqlash','save-price','primary full')}
+      </div>
       ${section('To‘ylar bo‘yicha jamlanma')}
       ${totalsByWedding.length?`<div class="list">${totalsByWedding.map(x=>`<div class="card"><div class="card-row"><div><div class="card-title">${esc(x.w.name)} to‘yi</div><div class="muted">${dateText(x.w.wedding_date)} · ${x.count} kishi</div></div><div class="right"><div class="amount">${compactMoney(x.total)}</div><div class="muted">so‘m</div></div></div></div>`).join('')}</div>`:empty('▤','Hisobot hali bo‘sh','To‘y va to‘yona qo‘shilgach, jamlanma shu yerda ko‘rinadi.')}
       <div class="card">
         <div class="card-title">📊 Hisobotni olish va yuklash</div>
-        <p class="muted">Barcha to‘ylar, oshnalar, summa va go‘sht hisob-kitoblarini o‘z ichiga olgan toza, tushunarli jadval.</p>
+        <p class="muted">Barcha to‘ylar, oshnalar, summa, go‘sht (kg) va dollar ($) hisob-kitoblarini o‘z ichiga olgan toza, tushunarli jadval.</p>
         <div class="action-row" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
           <button class="btn primary full" id="sendTgBtn" data-action="send-telegram-report">📤 Telegram botga yuborish (Excel)</button>
           <button class="btn secondary full" data-action="export-excel">📊 Excel faylni yuklab olish (.xls)</button>
@@ -319,27 +435,98 @@
     const options=state.friends.map(f=>`<option value="${f.id}">${esc(f.name)}</option>`).join('');
     openModal('Yangi to‘y',`${state.friends.length?`<div class="field"><label>To‘y egasi (oshna)</label><select id="wFriend"><option value="">Tanlanmagan</option>${options}</select></div>`:`<p class="note">Hozircha oshnalar ro‘yxati bo‘sh. To‘y nomini kiritishingiz mumkin, keyin oshna qo‘shing.</p>`}
       ${field('To‘y nomi','wName','','text','required maxlength="100" placeholder="Masalan, Azizbekning to‘yi"')}
-      <div class="form-grid">${field('Sana','wDate','','date')}${field('Go‘sht narxi (so‘m/kg)','wPrice',state.currentPrice,'number','min="1" required')}</div>
-      <div class="form-grid">${field('Minimum (kg)','wMin','2','number','min="0" max="100" step="0.5" required')}${field('Izoh','wNote','','text','maxlength="500" placeholder="Ixtiyoriy"')}</div>`,async()=>{
-      const name=document.getElementById('wName').value.trim(), meatPriceValue=Number(document.getElementById('wPrice').value), minKg=Number(document.getElementById('wMin').value);
-      if(!name)throw new Error('To‘y nomini kiriting.');if(!Number.isSafeInteger(meatPriceValue)||meatPriceValue<1)throw new Error('Go‘sht narxini to‘g‘ri kiriting.');
-      await api('/api/weddings',{method:'POST',body:JSON.stringify({friendId:document.getElementById('wFriend')?.value||'',name,date:document.getElementById('wDate').value,meatPrice:meatPriceValue,minKg,note:document.getElementById('wNote').value})});
-      await api('/api/settings',{method:'PUT',body:JSON.stringify({currentPrice:meatPriceValue})});await load(false);toast('To‘y qo‘shildi.');
+      <div class="field">
+        <label>Hisoblash usuli</label>
+        <select id="wCalcType">
+          <option value="both" selected>🥩 Go‘sht (kg) va 💵 Dollar ($)</option>
+          <option value="meat">🥩 Faqat Go‘sht bo‘yicha</option>
+          <option value="dollar">💵 Faqat Dollar bo‘yicha</option>
+        </select>
+      </div>
+      <div class="form-grid">
+        ${field('Sana','wDate','','date')}
+        ${field('1 kg go‘sht (so‘m)','wPrice',state.currentPrice,'number','min="1" required')}
+      </div>
+      <div class="form-grid">
+        ${field('1 $ kursi (so‘m)','wDollar',state.currentDollarRate||12800,'number','min="1" required')}
+        ${field('Minimum (kg)','wMin','2','number','min="0" max="100" step="0.5" required')}
+      </div>
+      ${field('Izoh','wNote','','text','maxlength="500" placeholder="Ixtiyoriy"')}`,async()=>{
+      const name=document.getElementById('wName').value.trim();
+      const meatPriceValue=Number(document.getElementById('wPrice').value);
+      const dollarRateValue=Number(document.getElementById('wDollar').value);
+      const calcType=document.getElementById('wCalcType').value || 'both';
+      const minKg=Number(document.getElementById('wMin').value);
+      if(!name)throw new Error('To‘y nomini kiriting.');
+      if(!Number.isSafeInteger(meatPriceValue)||meatPriceValue<1)throw new Error('Go‘sht narxini to‘g‘ri kiriting.');
+      if(!Number.isSafeInteger(dollarRateValue)||dollarRateValue<1)throw new Error('Dollar kursini to‘g‘ri kiriting.');
+      await api('/api/weddings',{
+        method:'POST',
+        body:JSON.stringify({
+          friendId:document.getElementById('wFriend')?.value||'',
+          name,
+          date:document.getElementById('wDate').value,
+          meatPrice:meatPriceValue,
+          dollarRate:dollarRateValue,
+          calcType,
+          minKg,
+          note:document.getElementById('wNote').value
+        })
+      });
+      await api('/api/settings',{
+        method:'PUT',
+        body:JSON.stringify({currentPrice:meatPriceValue, currentDollarRate:dollarRateValue})
+      });
+      await load(false);
+      toast('To‘y qo‘shildi.');
     });
   }
 
   function editWedding() {
     const w=wedding(state.selectedWedding);if(!w)return;
     const options=state.friends.map(f=>`<option value="${f.id}" ${f.id===w.friend_id?'selected':''}>${esc(f.name)}</option>`).join('');
+    const calc = w.calc_type || 'both';
     openModal('To‘yni tahrirlash',`<div class="field"><label>To‘y egasi</label><select id="wFriend"><option value="">Tanlanmagan</option>${options}</select></div>
       ${field('To‘y nomi','wName',w.name,'text','required maxlength="100"')}
-      <div class="form-grid">${field('Sana','wDate',w.wedding_date?String(w.wedding_date).slice(0,10):'','date')}${field('Go‘sht narxi (so‘m/kg)','wPrice',w.meat_price,'number','min="1" required')}</div>
-      <div class="form-grid">${field('Minimum (kg)','wMin',w.min_kg,'number','min="0" max="100" step="0.5" required')}${field('Izoh','wNote',w.note||'','text','maxlength="500"')}</div>
-      <p class="note">To‘y narxini o‘zgartirish avval kiritilgan to‘yona yozuvlarining tarixiy kg narxini o‘zgartirmaydi.</p>`,async()=>{
-      const name=document.getElementById('wName').value.trim(),price=Number(document.getElementById('wPrice').value),minKg=Number(document.getElementById('wMin').value);
-      if(!name||!Number.isSafeInteger(price)||price<1||!Number.isFinite(minKg)||minKg<0)throw new Error('Maydonlarni tekshiring.');
-      await api('/api/weddings/'+w.id,{method:'PUT',body:JSON.stringify({friendId:document.getElementById('wFriend').value,name,date:document.getElementById('wDate').value,meatPrice:price,minKg,note:document.getElementById('wNote').value})});
-      await load(false);toast('To‘y yangilandi.');
+      <div class="field">
+        <label>Hisoblash usuli</label>
+        <select id="wCalcType">
+          <option value="both" ${calc==='both'?'selected':''}>🥩 Go‘sht (kg) va 💵 Dollar ($)</option>
+          <option value="meat" ${calc==='meat'?'selected':''}>🥩 Faqat Go‘sht bo‘yicha</option>
+          <option value="dollar" ${calc==='dollar'?'selected':''}>💵 Faqat Dollar bo‘yicha</option>
+        </select>
+      </div>
+      <div class="form-grid">
+        ${field('Sana','wDate',w.wedding_date?String(w.wedding_date).slice(0,10):'','date')}
+        ${field('1 kg go‘sht (so‘m)','wPrice',w.meat_price,'number','min="1" required')}
+      </div>
+      <div class="form-grid">
+        ${field('1 $ kursi (so‘m)','wDollar',dollarRate(w),'number','min="1" required')}
+        ${field('Minimum (kg)','wMin',w.min_kg,'number','min="0" max="100" step="0.5" required')}
+      </div>
+      ${field('Izoh','wNote',w.note||'','text','maxlength="500"')}
+      <p class="note">To‘y narxi yoki kursini o‘zgartirish ushbu to‘ydagi yozuvlar uchun qo‘llaniladi.</p>`,async()=>{
+      const name=document.getElementById('wName').value.trim();
+      const price=Number(document.getElementById('wPrice').value);
+      const dollarRateValue=Number(document.getElementById('wDollar').value);
+      const calcType=document.getElementById('wCalcType').value || 'both';
+      const minKg=Number(document.getElementById('wMin').value);
+      if(!name||!Number.isSafeInteger(price)||price<1||!Number.isSafeInteger(dollarRateValue)||dollarRateValue<1||!Number.isFinite(minKg)||minKg<0)throw new Error('Maydonlarni to‘g‘ri to‘ldiring.');
+      await api('/api/weddings/'+w.id,{
+        method:'PUT',
+        body:JSON.stringify({
+          friendId:document.getElementById('wFriend').value,
+          name,
+          date:document.getElementById('wDate').value,
+          meatPrice:price,
+          dollarRate:dollarRateValue,
+          calcType,
+          minKg,
+          note:document.getElementById('wNote').value
+        })
+      });
+      await load(false);
+      toast('To‘y yangilandi.');
     });
   }
 
@@ -375,6 +562,7 @@
         friend_id: fid,
         amount: amountValue,
         meat_price: w?.meat_price || state.currentPrice,
+        dollar_rate: dollarRate(w),
         note: ''
       });
     }
@@ -387,7 +575,7 @@
     }
     if (kgEl) {
       const g = gift(wid, fid);
-      kgEl.textContent = amountValue ? `${kg(meatKg(g))} kg · ${money(amountValue)}` : 'Hali kiritilmagan';
+      kgEl.innerHTML = amountValue ? `🥩 <b>${kg(meatKg(g))} kg</b> · 💵 <b>${dollar(dollarKg(g))}</b> · ${money(amountValue)}` : 'Hali kiritilmagan';
     }
 
     const statsBox = document.getElementById('wedding-stats-box');
@@ -395,9 +583,11 @@
       const gs = weddingGifts(wid);
       const total = weddingTotal(w);
       const kgTotal = gs.reduce((s, g) => s + meatKg(g), 0);
+      const dlTotal = gs.reduce((s, g) => s + dollarKg(g), 0);
       statsBox.innerHTML = stats([
         { value: compactMoney(total), label: 'Jami so‘m' },
-        { value: kg(kgTotal) + ' kg', label: 'Go‘sht ekvivalenti' },
+        { value: kg(kgTotal) + ' kg', label: '🥩 Go‘sht ekv.' },
+        { value: dollar(dlTotal), label: '💵 Dollar ekv.' },
         { value: `${gs.length}/${state.friends.length}`, label: 'To‘yona bergan' }
       ]);
     }
@@ -498,10 +688,14 @@
       else if (a === 'fill-due') await fillDue(el);
       else if (a === 'save-price') {
         const p = Number(document.getElementById('reportPrice').value);
-        if (!Number.isSafeInteger(p) || p < 1) throw new Error('Narxni to‘g‘ri kiriting.');
-        await api('/api/settings', { method: 'PUT', body: JSON.stringify({ currentPrice: p }) });
+        const d = Number(document.getElementById('reportDollar').value);
+        if (!Number.isSafeInteger(p) || p < 1) throw new Error('Go‘sht narxini to‘g‘ri kiriting.');
+        if (!Number.isSafeInteger(d) || d < 1) throw new Error('Dollar kursini to‘g‘ri kiriting.');
+        await api('/api/settings', { method: 'PUT', body: JSON.stringify({ currentPrice: p, currentDollarRate: d }) });
+        state.currentPrice = p;
+        state.currentDollarRate = d;
         await load(false);
-        toast('Narx saqlandi.');
+        toast('Narx va kurs saqlandi.');
       }
       else if (a === 'export-excel') await exportExcel();
       else if (a === 'export-csv') await exportCsv();
@@ -541,14 +735,16 @@
 
   document.addEventListener('change', async e => {
     if (e.target.matches('[data-gift-input]')) await saveGift(e.target);
-    if (e.target.id === 'currentPriceInput' || e.target.id === 'reportPrice') {
-      const p = Number(e.target.value);
-      if (Number.isSafeInteger(p) && p > 0) {
+    if (e.target.id === 'currentPriceInput' || e.target.id === 'currentDollarInput') {
+      const p = Number(document.getElementById('currentPriceInput')?.value || state.currentPrice);
+      const d = Number(document.getElementById('currentDollarInput')?.value || state.currentDollarRate);
+      if (Number.isSafeInteger(p) && p > 0 && Number.isSafeInteger(d) && d > 0) {
         try {
-          await api('/api/settings', { method: 'PUT', body: JSON.stringify({ currentPrice: p }) });
+          await api('/api/settings', { method: 'PUT', body: JSON.stringify({ currentPrice: p, currentDollarRate: d }) });
           state.currentPrice = p;
+          state.currentDollarRate = d;
           await load(false);
-          toast('Narx yangilandi.');
+          toast('Narx va kurs yangilandi.');
         } catch (err) { fail(err); }
       }
     }
