@@ -372,16 +372,6 @@
           <button class="btn secondary full" data-action="export-csv">📥 CSV hisobotini yuklab olish (.csv)</button>
         </div>
         <p class="note" style="margin-top:10px">💡 <b>Telegram botga yuborish</b> orqali chiroyli Excel fayli to‘g‘ridan-to‘g‘ri shaxsiy botingizga yuboriladi!</p>
-      </div>
-      <div class="card">
-        <div class="card-title">💾 Zaxira nusxa (Backup & Fayl yuklash)</div>
-        <p class="muted">Ma’lumotlarni xavfsiz saqlash, boshqa telefonga o‘tkazish yoki fayldan bazani tiklash.</p>
-        <div class="action-row" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
-          <button class="btn secondary full" data-action="export-backup">💾 Zaxira nusxasini yuklab olish (.json)</button>
-          <button class="btn secondary full" data-action="trigger-restore">📤 Zaxira faylini yuklash (Bazani tiklash)</button>
-          <input type="file" id="restoreFileInput" accept=".json,application/json" style="display:none">
-        </div>
-        <p class="note" style="margin-top:10px">🔄 <b>Fayl yuklash:</b> Saqlangan <code>.json</code> zaxira faylini yuklasangiz, barcha oshnalar, to‘ylar va to‘yona yozuvlari avtomatik bazaga yuklanadi.</p>
       </div>`;
   }
 
