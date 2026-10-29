@@ -3228,8 +3228,27 @@ async def bot_polling_loop():
                     text = msg.get("text", "")
 
                     if chat_id != ADMIN_ID:
+                        normalized = text.strip().lower()
+                        cmd_word = normalized.split()[0].split("@")[0] if normalized else ""
+                        if cmd_word in ["/start", "/toyona", "toyona", "/menyu", "menyu", "/menu"]:
+                            kb = {
+                                "inline_keyboard": [
+                                    [{"text": "💒 To‘yona daftarchasini ochish", "web_app": {"url": "https://assistant-nu-nine.vercel.app"}}],
+                                    [{"text": "🌐 Brauzerda ochish", "url": "https://assistant-nu-nine.vercel.app"}]
+                                ]
+                            }
+                            send_message(
+                                chat_id,
+                                "👋 <b>Assalomu alaykum!</b>\n\n"
+                                "💒 <b>To‘yona hisobi</b> — to‘yona, oshnalar va hisob-kitoblar daftarchangizga xush kelibsiz.\n\n"
+                                "O‘z shaxsiy daftarchangizni ochish uchun quyidagi tugmani bosing:",
+                                kb,
+                                parse_mode="HTML"
+                            )
+                            continue
+
                         print(f"RAD ETILDI (admin emas): {chat_id} -> {text}")
-                        send_message(chat_id, "Kechirasiz, bu shaxsiy yordamchi bot va faqat egasi uchun ishlaydi.")
+                        send_message(chat_id, "Kechirasiz, sun'iy intellekt yordamchisi faqat bot egasi uchun ishlaydi.\n\nTo‘yona hisob-kitob daftarchasini ochish uchun /toyona buyrug‘ini yuboring.")
                         continue
 
                     

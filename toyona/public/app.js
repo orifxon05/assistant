@@ -85,12 +85,25 @@
   const allGiftDollars = () => state.gifts.reduce((s,g)=>s+dollarKg(g),0);
 
   function promptAccessKey() {
-    openModal('🔑 Kirish kalitini kiriting', `
-      <p class="muted">Ushbu brauzerda to‘yona ma’lumotlariga kirish uchun parolni kiriting:</p>
-      <div class="field" style="margin-top:10px">
-        <label for="inputAuthKey">Parol / Kalit so‘z</label>
-        <input id="inputAuthKey" type="text" placeholder="Standart: orifxon" value="orifxon" required>
+    const tgBotLink = 'https://t.me/Orifxon_assistantbot?start=toyona';
+    openModal('🔑 To‘yona daftarchasiga kirish', `
+      <div style="text-align:center;padding:4px 0 12px;">
+        <div style="font-size:32px;margin-bottom:6px;">💒</div>
+        <p class="muted" style="font-size:13.5px;line-height:1.5;margin:0 0 14px;">To‘yona daftarchangizga kirish uchun quyidagi qulay usuldan foydalaning:</p>
+        <a href="${tgBotLink}" target="_blank" class="btn primary full" style="display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;padding:12px;font-weight:600;margin-bottom:14px;border-radius:10px;">
+          <span>📲</span> Telegram orqali bitta bosishda kirish
+        </a>
+        <div style="display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;margin-bottom:12px;">
+          <span style="flex:1;height:1px;background:var(--line,#e0e6e2);"></span>
+          <span>YOKI SHAXSIY KALIT BILAN</span>
+          <span style="flex:1;height:1px;background:var(--line,#e0e6e2);"></span>
+        </div>
       </div>
+      <div class="field">
+        <label for="inputAuthKey">Shaxsiy kirish kaliti / PIN</label>
+        <input id="inputAuthKey" type="text" placeholder="Masalan: orifxon yoki shaxsiy kalit" value="${localStorage.getItem('toyona_access_key') || ''}" required>
+      </div>
+      <p class="note" style="margin-top:8px;">💡 Agar kalitingizni bilmasangiz, yuqoridagi <b>Telegram orqali kirish</b> tugmasini bosing va o‘z daftarchangiz ichidan shaxsiy havolangizni oling.</p>
     `, async () => {
       const val = (document.getElementById('inputAuthKey')?.value || '').trim();
       if (!val) throw new Error('Kalit so‘zni kiriting.');
@@ -126,6 +139,9 @@
     try {
       const data = await api('/api/bootstrap');
       Object.assign(state, data);
+      if (state.user?.access_key) {
+        localStorage.setItem('toyona_access_key', state.user.access_key);
+      }
       const first = state.user?.first_name ? `${state.user.first_name}, xush kelibsiz!` : 'Hisob-kitoblaringiz bir joyda';
       document.getElementById('greeting').textContent = first;
       render();
@@ -372,6 +388,19 @@
           <button class="btn secondary full" data-action="export-csv">📥 CSV hisobotini yuklab olish (.csv)</button>
         </div>
         <p class="note" style="margin-top:10px">💡 <b>Telegram botga yuborish</b> orqali chiroyli Excel fayli to‘g‘ridan-to‘g‘ri shaxsiy botingizga yuboriladi!</p>
+      </div>
+      <div class="card">
+        <div class="card-title">🌐 Kompyuter yoki brauzerda ochish</div>
+        <p class="muted">To‘yona daftarchangizni kompyuter yoki telefon brauzerida ochish uchun shaxsiy havolangiz:</p>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <input type="text" id="personalWebLink" readonly value="${window.location.origin}/?key=${encodeURIComponent(state.user?.access_key || localStorage.getItem('toyona_access_key') || 'orifxon')}" style="flex:1;font-size:12px;padding:8px 10px;background:var(--input-bg,#f3f6f4);border:1px solid var(--line,#dce4e0);border-radius:8px;">
+          <button class="btn secondary" data-action="copy-personal-link">Nusxalash</button>
+        </div>
+        <div class="card-row" style="margin-top:12px;">
+          <span class="muted">Shaxsiy kalitingiz: <b>${esc(state.user?.access_key || localStorage.getItem('toyona_access_key') || 'orifxon')}</b></span>
+          <button class="btn secondary small" data-action="change-personal-key">✎ Kalitni o‘zgartirish</button>
+        </div>
+        <p class="note" style="margin-top:10px">💡 Ushbu havolani kompyuteringizda ochsangiz, parolsiz to‘g‘ridan-to‘g‘ri shaxsiy daftarchangiz ochiladi.</p>
       </div>`;
   }
 
@@ -745,6 +774,32 @@
     }
   }
 
+  function changePersonalKey() {
+    const currentKey = state.user?.access_key || localStorage.getItem('toyona_access_key') || '';
+    openModal('✎ Shaxsiy kirish kalitini o‘zgartirish', `
+      <p class="muted">Kompyuter yoki brauzerda ochish uchun o‘zingizga qulay kalit so‘z (parol) tanlang:</p>
+      <div class="field" style="margin-top:12px;">
+        <label for="newKeyInput">Yangi kalit so‘z (kamida 3 ta belgi)</label>
+        <input id="newKeyInput" type="text" value="${esc(currentKey)}" placeholder="Masalan: orifxon yoki jasur77" required>
+      </div>
+      <p class="note" style="margin-top:8px;">💡 Faqat harflar, raqamlar va chiziqcha (_) ishlatish mumkin.</p>
+    `, async () => {
+      const val = (document.getElementById('newKeyInput')?.value || '').trim();
+      if (!val || val.length < 3) throw new Error('Kalit so‘z kamida 3 ta belgidan iborat bo‘lishi kerak.');
+      const res = await api('/api/user/key', {
+        method: 'PUT',
+        body: JSON.stringify({ key: val })
+      });
+      if (res.access_key) {
+        if (!state.user) state.user = {};
+        state.user.access_key = res.access_key;
+        localStorage.setItem('toyona_access_key', res.access_key);
+        render();
+        toast('✅ Shaxsiy kalit muvaffaqiyatli yangilandi!');
+      }
+    }, 'Saqlash');
+  }
+
   document.addEventListener('click', async e => {
     const nav = e.target.closest('[data-page]');
     if (nav) { setPage(nav.dataset.page); return; }
@@ -785,6 +840,19 @@
         }
       }
       else if (a === 'send-telegram-report') await sendTelegramReport(el);
+      else if (a === 'copy-personal-link') {
+        const key = state.user?.access_key || localStorage.getItem('toyona_access_key') || 'orifxon';
+        const link = `${window.location.origin}/?key=${encodeURIComponent(key)}`;
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(link).then(() => toast('✅ Shaxsiy havola nusxalandi!')).catch(() => {});
+        } else {
+          const inp = document.getElementById('personalWebLink');
+          inp?.select();
+          document.execCommand('copy');
+          toast('✅ Shaxsiy havola nusxalandi!');
+        }
+      }
+      else if (a === 'change-personal-key') changePersonalKey();
       else if (a === 'go-reports') setPage('reports');
     } catch (err) { fail(err); }
   });

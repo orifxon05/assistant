@@ -56,7 +56,7 @@ async function auth(req, res, next) {
         username: 'orifxon05'
       };
     } else {
-      // 1. Check Telegram WebApp initData
+      // 1. Check Telegram WebApp initData (from Telegram Mini App)
       const initData = req.get('X-Telegram-Init-Data') || req.query.initData || req.query.tgWebAppInitData;
       if (initData) {
         user = validateTelegramInitData(initData);
@@ -64,21 +64,40 @@ async function auth(req, res, next) {
 
       // 2. Check Web link access key / token / PIN (for opening via direct link in any browser/phone)
       if (!user) {
-        const key = String(
+        const rawKey = String(
           req.get('X-Toyona-Key') ||
           req.get('X-Toyona-Auth') ||
           req.query.key ||
           req.query.token ||
           req.body?.authKey ||
           ''
-        ).toLowerCase().trim();
+        ).trim();
 
-        if (key && (key === DEFAULT_ACCESS_KEY || key === ADMIN_ID || key === '7813' || key === 'orifxon')) {
-          user = {
-            id: ADMIN_ID,
-            first_name: 'Orifxon',
-            username: 'orifxon05'
-          };
+        if (rawKey) {
+          const lowerKey = rawKey.toLowerCase();
+          // Master key for Orifxon
+          if (lowerKey === DEFAULT_ACCESS_KEY || lowerKey === ADMIN_ID || lowerKey === '7813' || lowerKey === 'orifxon') {
+            user = {
+              id: ADMIN_ID,
+              first_name: 'Orifxon',
+              username: 'orifxon05'
+            };
+          } else {
+            // Find user by their personal access_key or telegram_id
+            const dbUser = await query(
+              'SELECT telegram_id, first_name, username, access_key FROM app_users WHERE access_key=$1 OR LOWER(access_key)=$2 OR telegram_id::text=$1 LIMIT 1',
+              [rawKey, lowerKey]
+            );
+            if (dbUser.rowCount) {
+              const u = dbUser.rows[0];
+              user = {
+                id: String(u.telegram_id),
+                first_name: u.first_name || '',
+                username: u.username || '',
+                access_key: u.access_key || rawKey
+              };
+            }
+          }
         }
       }
 
@@ -86,17 +105,29 @@ async function auth(req, res, next) {
         return res.status(401).json({
           error: 'Kirish uchun ruxsat berilmadi.',
           auth_required: true,
-          message: 'Mini App’ni Telegram orqali oching yoki kirish kalitini (parol) kiriting.'
+          message: 'Mini App’ni Telegram orqali oching yoki shaxsiy kirish kalitingizni kiriting.'
         });
       }
     }
 
     req.user = user;
-    await query(
-      `INSERT INTO app_users(telegram_id, first_name, username) VALUES($1,$2,$3)
-       ON CONFLICT(telegram_id) DO UPDATE SET first_name=EXCLUDED.first_name, username=EXCLUDED.username`,
-      [req.user.id, req.user.first_name, req.user.username]
-    );
+
+    // Check or create access_key for this user
+    const existing = await query('SELECT telegram_id, access_key FROM app_users WHERE telegram_id=$1', [req.user.id]);
+    let userKey = existing.rows[0]?.access_key;
+    if (!existing.rowCount) {
+      userKey = (req.user.id === ADMIN_ID) ? 'orifxon' : ('toy_' + crypto.randomBytes(4).toString('hex'));
+      await query(
+        `INSERT INTO app_users(telegram_id, first_name, username, access_key) VALUES($1,$2,$3,$4)
+         ON CONFLICT(telegram_id) DO UPDATE SET first_name=EXCLUDED.first_name, username=EXCLUDED.username`,
+        [req.user.id, req.user.first_name, req.user.username, userKey]
+      );
+    } else if (!userKey) {
+      userKey = (req.user.id === ADMIN_ID) ? 'orifxon' : ('toy_' + crypto.randomBytes(4).toString('hex'));
+      await query('UPDATE app_users SET access_key=$1 WHERE telegram_id=$2', [userKey, req.user.id]);
+    }
+    req.user.access_key = userKey;
+
     await query(`INSERT INTO settings(telegram_id) VALUES($1) ON CONFLICT(telegram_id) DO NOTHING`, [req.user.id]);
     next();
   } catch (e) {
@@ -172,6 +203,20 @@ app.put('/api/settings', asyncHandler(async (req, res) => {
     await query('UPDATE settings SET current_dollar_rate=$1, updated_at=NOW() WHERE telegram_id=$2', [dollarRate, req.user.id]);
   }
   res.json({ ok: true });
+}));
+
+app.put('/api/user/key', asyncHandler(async (req, res) => {
+  const newKey = String(req.body.key || '').trim();
+  if (!newKey || newKey.length < 3 || newKey.length > 32 || !/^[a-zA-Z0-9_-]+$/.test(newKey)) {
+    return res.status(400).json({ error: 'Kalit so‘z 3–32 ta harf, raqam yoki chiziqcha (_) dan iborat bo‘lishi kerak.' });
+  }
+  const conflict = await query('SELECT telegram_id FROM app_users WHERE LOWER(access_key)=$1 AND telegram_id!=$2', [newKey.toLowerCase(), req.user.id]);
+  if (conflict.rowCount) {
+    return res.status(400).json({ error: 'Ushbu kalit so‘z band. Boshqa kalit tanlang.' });
+  }
+  await query('UPDATE app_users SET access_key=$1 WHERE telegram_id=$2', [newKey, req.user.id]);
+  req.user.access_key = newKey;
+  res.json({ ok: true, access_key: newKey });
 }));
 
 app.post('/api/friends', asyncHandler(async (req, res) => {
