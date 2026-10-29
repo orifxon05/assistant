@@ -57,7 +57,7 @@ async function auth(req, res, next) {
       };
     } else {
       // 1. Check Telegram WebApp initData
-      const initData = req.get('X-Telegram-Init-Data');
+      const initData = req.get('X-Telegram-Init-Data') || req.query.initData || req.query.tgWebAppInitData;
       if (initData) {
         user = validateTelegramInitData(initData);
       }
@@ -281,7 +281,7 @@ app.put('/api/gifts', asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.get('/api/backup', asyncHandler(async (req, res) => {
+app.get(['/api/backup', '/api/backup.json'], asyncHandler(async (req, res) => {
   const owner = req.user.id;
   const [settings, friends, weddings, gifts] = await Promise.all([
     query('SELECT * FROM settings WHERE telegram_id=$1', [owner]),
@@ -289,62 +289,110 @@ app.get('/api/backup', asyncHandler(async (req, res) => {
     query('SELECT * FROM weddings WHERE telegram_id=$1', [owner]),
     query('SELECT * FROM gifts WHERE telegram_id=$1', [owner])
   ]);
-  res.json({
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const data = {
+    version: '2.0',
+    app: 'toyona',
     telegram_id: owner,
     exported_at: new Date().toISOString(),
     settings: settings.rows[0] || null,
     friends: friends.rows,
     weddings: weddings.rows,
     gifts: gifts.rows
-  });
+  };
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="toyona_backup_${dateStr}.json"`);
+  res.send(JSON.stringify(data, null, 2));
 }));
 
 app.post('/api/restore', asyncHandler(async (req, res) => {
   const owner = req.user.id;
   const { settings, friends, weddings, gifts } = req.body || {};
-  if (settings && settings.current_price) {
+  let restoredFriends = 0;
+  let restoredWeddings = 0;
+  let restoredGifts = 0;
+
+  if (settings) {
+    const cp = Number(settings.current_price || 150000);
+    const cd = Number(settings.current_dollar_rate || 12800);
     await query(
-      `INSERT INTO settings(telegram_id, current_price, updated_at) VALUES($1,$2,NOW())
-       ON CONFLICT(telegram_id) DO UPDATE SET current_price=EXCLUDED.current_price, updated_at=NOW()`,
-      [owner, Number(settings.current_price)]
+      `INSERT INTO settings(telegram_id, current_price, current_dollar_rate, updated_at) VALUES($1,$2,$3,NOW())
+       ON CONFLICT(telegram_id) DO UPDATE SET current_price=EXCLUDED.current_price, current_dollar_rate=EXCLUDED.current_dollar_rate, updated_at=NOW()`,
+      [owner, cp, cd]
     );
   }
+
   if (Array.isArray(friends)) {
     for (const f of friends) {
       if (f.id && f.name) {
         await query(
           `INSERT INTO friends(id, telegram_id, name) VALUES($1,$2,$3)
            ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name`,
-          [f.id, owner, f.name]
+          [f.id, owner, String(f.name).trim()]
         );
+        restoredFriends++;
       }
     }
   }
+
   if (Array.isArray(weddings)) {
     for (const w of weddings) {
       if (w.id && w.name) {
+        const friendId = (w.friend_id && String(w.friend_id).length > 10) ? String(w.friend_id) : null;
+        const wDate = (w.wedding_date && w.wedding_date !== 'null' && w.wedding_date !== 'undefined') ? String(w.wedding_date).slice(0, 10) : null;
+        const price = Number(w.meat_price || 150000);
+        const dollarRate = Number(w.dollar_rate || 12800);
+        const calcType = ['both', 'meat', 'dollar'].includes(w.calc_type) ? w.calc_type : 'both';
+        const minKg = Number(w.min_kg ?? 2);
+        const note = String(w.note || '').trim().slice(0, 500);
+
         await query(
-          `INSERT INTO weddings(id, telegram_id, friend_id, name, wedding_date, meat_price, min_kg, note)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-           ON CONFLICT(id) DO UPDATE SET name=EXCLUDED.name, wedding_date=EXCLUDED.wedding_date, meat_price=EXCLUDED.meat_price, min_kg=EXCLUDED.min_kg, friend_id=EXCLUDED.friend_id, note=EXCLUDED.note`,
-          [w.id, owner, w.friend_id || null, w.name, w.wedding_date || null, Number(w.meat_price), Number(w.min_kg || 2), w.note || '']
+          `INSERT INTO weddings(id, telegram_id, friend_id, name, wedding_date, meat_price, dollar_rate, calc_type, min_kg, note)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT(id) DO UPDATE SET
+             name=EXCLUDED.name,
+             wedding_date=EXCLUDED.wedding_date,
+             meat_price=EXCLUDED.meat_price,
+             dollar_rate=EXCLUDED.dollar_rate,
+             calc_type=EXCLUDED.calc_type,
+             min_kg=EXCLUDED.min_kg,
+             friend_id=EXCLUDED.friend_id,
+             note=EXCLUDED.note`,
+          [w.id, owner, friendId, String(w.name).trim(), wDate, price, dollarRate, calcType, minKg, note]
         );
+        restoredWeddings++;
       }
     }
   }
+
   if (Array.isArray(gifts)) {
     for (const g of gifts) {
-      if (g.wedding_id && g.friend_id && g.amount) {
+      if (g.wedding_id && g.friend_id && g.amount !== undefined) {
+        const amount = Number(g.amount);
+        const meatP = Number(g.meat_price || 150000);
+        const dollR = Number(g.dollar_rate || 12800);
+        const gNote = String(g.note || '').trim().slice(0, 500);
         await query(
-          `INSERT INTO gifts(id, telegram_id, wedding_id, friend_id, amount, meat_price, note)
-           VALUES($1,$2,$3,$4,$5,$6,$7)
-           ON CONFLICT(wedding_id, friend_id) DO UPDATE SET amount=EXCLUDED.amount, meat_price=EXCLUDED.meat_price, note=EXCLUDED.note`,
-          [g.id || randomUUID(), owner, g.wedding_id, g.friend_id, Number(g.amount), Number(g.meat_price), g.note || '']
+          `INSERT INTO gifts(id, telegram_id, wedding_id, friend_id, amount, meat_price, dollar_rate, note)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+           ON CONFLICT(wedding_id, friend_id) DO UPDATE SET
+             amount=EXCLUDED.amount,
+             meat_price=EXCLUDED.meat_price,
+             dollar_rate=EXCLUDED.dollar_rate,
+             note=EXCLUDED.note,
+             updated_at=NOW()
+           WHERE gifts.telegram_id=EXCLUDED.telegram_id`,
+          [g.id || randomUUID(), owner, g.wedding_id, g.friend_id, amount, meatP, dollR, gNote]
         );
+        restoredGifts++;
       }
     }
   }
-  res.json({ ok: true, message: 'Baza muvaffaqiyatli tiklandi.' });
+
+  res.json({
+    ok: true,
+    message: `Baza muvaffaqiyatli tiklandi: ${restoredFriends} ta oshna, ${restoredWeddings} ta to‘y, ${restoredGifts} ta to‘yona yozuvi tiklandi.`
+  });
 }));
 
 function buildToyonaReport(settings, friends, weddings, gifts) {
@@ -588,16 +636,18 @@ async function fetchReportData(owner) {
 app.get('/api/export.xls', asyncHandler(async (req, res) => {
   const [settings, friends, weddings, gifts] = await fetchReportData(req.user.id);
   const { excelHtml } = buildToyonaReport(settings, friends, weddings, gifts);
+  const dateStr = new Date().toISOString().slice(0, 10);
   res.setHeader('Content-Type', 'application/vnd.ms-excel; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="toyona_hisoboti.xls"');
+  res.setHeader('Content-Disposition', `attachment; filename="toyona_hisoboti_${dateStr}.xls"`);
   res.send(excelHtml);
 }));
 
 app.get('/api/export.csv', asyncHandler(async (req, res) => {
   const [settings, friends, weddings, gifts] = await fetchReportData(req.user.id);
   const { csvContent } = buildToyonaReport(settings, friends, weddings, gifts);
+  const dateStr = new Date().toISOString().slice(0, 10);
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', 'attachment; filename="toyona_hisoboti.csv"');
+  res.setHeader('Content-Disposition', `attachment; filename="toyona_hisoboti_${dateStr}.csv"`);
   res.send(csvContent);
 }));
 

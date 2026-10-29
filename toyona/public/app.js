@@ -364,14 +364,24 @@
       ${section('To‘ylar bo‘yicha jamlanma')}
       ${totalsByWedding.length?`<div class="list">${totalsByWedding.map(x=>`<div class="card"><div class="card-row"><div><div class="card-title">${esc(x.w.name)} to‘yi</div><div class="muted">${dateText(x.w.wedding_date)} · ${x.count} kishi</div></div><div class="right"><div class="amount">${compactMoney(x.total)}</div><div class="muted">so‘m</div></div></div></div>`).join('')}</div>`:empty('▤','Hisobot hali bo‘sh','To‘y va to‘yona qo‘shilgach, jamlanma shu yerda ko‘rinadi.')}
       <div class="card">
-        <div class="card-title">📊 Hisobotni olish va yuklash</div>
+        <div class="card-title">📊 Hisobotni yuklab olish</div>
         <p class="muted">Barcha to‘ylar, oshnalar, summa, go‘sht (kg) va dollar ($) hisob-kitoblarini o‘z ichiga olgan toza, tushunarli jadval.</p>
         <div class="action-row" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
           <button class="btn primary full" id="sendTgBtn" data-action="send-telegram-report">📤 Telegram botga yuborish (Excel)</button>
-          <button class="btn secondary full" data-action="export-excel">📊 Excel faylni yuklab olish (.xls)</button>
-          <button class="btn secondary full" data-action="export-csv">↓ CSV faylni yuklab olish (.csv)</button>
+          <button class="btn secondary full" data-action="export-excel">📥 Excel hisobotini yuklab olish (.xls)</button>
+          <button class="btn secondary full" data-action="export-csv">📥 CSV hisobotini yuklab olish (.csv)</button>
         </div>
-        <p class="note" style="margin-top:10px">💡 <b>Telegram botga yuborish</b> orqali chiroyli Excel fayli to‘g‘ridan-to‘g‘ri shaxsiy botingizga yuboriladi, fayllar orasidan qidirib yurmaysiz!</p>
+        <p class="note" style="margin-top:10px">💡 <b>Telegram botga yuborish</b> orqali chiroyli Excel fayli to‘g‘ridan-to‘g‘ri shaxsiy botingizga yuboriladi!</p>
+      </div>
+      <div class="card">
+        <div class="card-title">💾 Zaxira nusxa (Backup & Fayl yuklash)</div>
+        <p class="muted">Ma’lumotlarni xavfsiz saqlash, boshqa telefonga o‘tkazish yoki fayldan bazani tiklash.</p>
+        <div class="action-row" style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
+          <button class="btn secondary full" data-action="export-backup">💾 Zaxira nusxasini yuklab olish (.json)</button>
+          <button class="btn secondary full" data-action="trigger-restore">📤 Zaxira faylini yuklash (Bazani tiklash)</button>
+          <input type="file" id="restoreFileInput" accept=".json,application/json" style="display:none">
+        </div>
+        <p class="note" style="margin-top:10px">🔄 <b>Fayl yuklash:</b> Saqlangan <code>.json</code> zaxira faylini yuklasangiz, barcha oshnalar, to‘ylar va to‘yona yozuvlari avtomatik bazaga yuklanadi.</p>
       </div>`;
   }
 
@@ -612,39 +622,116 @@
     if(input){input.value=el.dataset.amount;await saveGift(input);}
   }
 
-  async function exportExcel() {
+  function getDownloadUrl(endpoint, filename) {
+    const accessKey = localStorage.getItem('toyona_access_key') || 'orifxon';
+    const params = new URLSearchParams();
+    if (accessKey) params.set('key', accessKey);
+    if (tg?.initData) params.set('initData', tg.initData);
+    params.set('t', String(Date.now()));
+    if (filename) params.set('filename', filename);
+    const origin = window.location.origin || '';
+    return `${origin}${endpoint}?${params.toString()}`;
+  }
+
+  async function downloadReportFile(endpoint, filename, btn) {
+    const oldText = btn ? btn.textContent : '';
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Yuklanmoqda...';
+    }
     try {
-      const response = await api('/api/export.xls');
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const nowStr = new Date().toISOString().slice(0, 10);
-      a.download = `toyona_hisoboti_${nowStr}.xls`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      toast('Excel hisoboti yuklab olindi.');
+      const url = getDownloadUrl(endpoint, filename);
+      const isTg = Boolean(window.Telegram?.WebApp?.initData);
+
+      // 1. Agar Telegram 8.0+ bo'lsa va downloadFile mavjud bo'lsa
+      if (isTg && typeof tg?.downloadFile === 'function' && tg?.isVersionAtLeast?.('8.0')) {
+        tg.downloadFile({ url, file_name: filename }, (accepted) => {
+          if (!accepted && typeof tg?.openLink === 'function') {
+            tg.openLink(url);
+          }
+        });
+        toast('Fayl yuklab olish boshlandi...');
+      } else if (isTg && typeof tg?.openLink === 'function') {
+        // 2. Telegram Mini App ichida Chrome / Safari orqali to'g'ridan-to'g'ri yuklab olish
+        tg.openLink(url);
+        toast('Fayl brauzer orqali yuklab olinmoqda...');
+      } else {
+        // 3. Standart veb brauzerlar (Chrome, Safari, Edge va h.k.)
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => a.remove(), 2000);
+        toast('Fayl yuklab olindi.');
+      }
     } catch (err) {
       fail(err);
+    } finally {
+      if (btn) {
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.textContent = oldText;
+        }, 1200);
+      }
     }
   }
 
-  async function exportCsv() {
+  async function exportExcel(btn) {
+    const nowStr = new Date().toISOString().slice(0, 10);
+    await downloadReportFile('/api/export.xls', `toyona_hisoboti_${nowStr}.xls`, btn);
+  }
+
+  async function exportCsv(btn) {
+    const nowStr = new Date().toISOString().slice(0, 10);
+    await downloadReportFile('/api/export.csv', `toyona_hisoboti_${nowStr}.csv`, btn);
+  }
+
+  async function exportBackup(btn) {
+    const nowStr = new Date().toISOString().slice(0, 10);
+    await downloadReportFile('/api/backup.json', `toyona_backup_${nowStr}.json`, btn);
+  }
+
+  async function handleRestoreFile(file) {
+    if (!file) return;
     try {
-      const response = await api('/api/export.csv');
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const nowStr = new Date().toISOString().slice(0, 10);
-      a.download = `toyona_hisoboti_${nowStr}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      toast('CSV hisoboti yuklab olindi.');
+      if (!file.name.toLowerCase().endsWith('.json') && file.type && !file.type.includes('json')) {
+        throw new Error('Faqat to‘yona zaxira .json faylini tanlang.');
+      }
+      const text = await file.text();
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error('Tanlangan fayl JSON formatida emas yoki fayl buzilgan.');
+      }
+
+      const friendsCount = Array.isArray(data.friends) ? data.friends.length : 0;
+      const weddingsCount = Array.isArray(data.weddings) ? data.weddings.length : 0;
+      const giftsCount = Array.isArray(data.gifts) ? data.gifts.length : 0;
+
+      if (!friendsCount && !weddingsCount && !giftsCount && !data.settings) {
+        throw new Error('Bu faylda to‘yona ma’lumotlari topilmadi.');
+      }
+
+      openModal('📥 Zaxira faylini tiklash (Yuklash)', `
+        <p>Tanlangan fayl: <b>${esc(file.name)}</b></p>
+        <div style="margin:12px 0;background:var(--card-bg, #f3f6f4);padding:12px 14px;border-radius:10px;font-size:14px;line-height:1.7;border:1px solid var(--border,#dce4e0);">
+          👥 <b>Oshnalar soni:</b> ${friendsCount} ta<br>
+          💒 <b>To‘ylar soni:</b> ${weddingsCount} ta<br>
+          📝 <b>To‘yona yozuvlari:</b> ${giftsCount} ta<br>
+          ⚙️ <b>Sozlamalar:</b> ${data.settings ? 'Mavjud' : 'Standart'}
+        </div>
+        <p class="muted">Ushbu ma’lumotlar bazaga yuklanadi va mavjud yozuvlar yangilanadi. Tiklashni tasdiqlaysizmi?</p>
+      `, async () => {
+        const res = await api('/api/restore', {
+          method: 'POST',
+          body: JSON.stringify(data)
+        });
+        await load(false);
+        toast(res.message || '✅ Baza muvaffaqiyatli tiklandi!');
+      }, 'Ha, bazaga yuklash');
     } catch (err) {
       fail(err);
     }
@@ -697,8 +784,16 @@
         await load(false);
         toast('Narx va kurs saqlandi.');
       }
-      else if (a === 'export-excel') await exportExcel();
-      else if (a === 'export-csv') await exportCsv();
+      else if (a === 'export-excel') await exportExcel(el);
+      else if (a === 'export-csv') await exportCsv(el);
+      else if (a === 'export-backup') await exportBackup(el);
+      else if (a === 'trigger-restore') {
+        const input = document.getElementById('restoreFileInput');
+        if (input) {
+          input.value = '';
+          input.click();
+        }
+      }
       else if (a === 'send-telegram-report') await sendTelegramReport(el);
       else if (a === 'go-reports') setPage('reports');
     } catch (err) { fail(err); }
@@ -735,6 +830,11 @@
 
   document.addEventListener('change', async e => {
     if (e.target.matches('[data-gift-input]')) await saveGift(e.target);
+    if (e.target.id === 'restoreFileInput' && e.target.files?.length) {
+      const file = e.target.files[0];
+      await handleRestoreFile(file);
+      e.target.value = '';
+    }
     if (e.target.id === 'currentPriceInput' || e.target.id === 'currentDollarInput') {
       const p = Number(document.getElementById('currentPriceInput')?.value || state.currentPrice);
       const d = Number(document.getElementById('currentDollarInput')?.value || state.currentDollarRate);
