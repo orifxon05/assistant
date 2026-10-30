@@ -941,7 +941,7 @@ app.post('/api/send-telegram-report', asyncHandler(async (req, res) => {
 
     if (!tgRes.ok || !tgJson.ok) {
       console.warn('[TOYONA TG DOC WARNING]:', tgJson);
-      await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      const msgRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -950,6 +950,16 @@ app.post('/api/send-telegram-report', asyncHandler(async (req, res) => {
           parse_mode: 'HTML'
         })
       });
+      const msgJson = await msgRes.json();
+      if (!msgRes.ok || !msgJson.ok) {
+        const desc = tgJson?.description || msgJson?.description || '';
+        if (desc.includes('chat not found') || desc.includes('blocked') || desc.includes('user not found')) {
+          return res.status(400).json({
+            error: 'Telegram bot sizga fayl yubora olmadi. Botimiz (@Orifxon_assistantbot) ga kirib /start bosganmisiz? Yoki hisobotni to‘g‘ridan-to‘g‘ri "Excel hisobotini yuklab olish" tugmasi orqali yuklab oling.'
+          });
+        }
+        return res.status(400).json({ error: 'Telegramga yuborishda xatolik: ' + desc });
+      }
     }
 
     return res.json({ ok: true, message: 'Excel hisoboti Telegram botingizga yuborildi!' });
