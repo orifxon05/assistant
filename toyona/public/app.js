@@ -3,11 +3,13 @@
   tg?.ready();
   tg?.expand();
 
-  // URL dan kirish kalitini tekshirish (?key=orifxon yoki ?token=orifxon)
+  // URL dan kirish kalitini tekshirish (?token=... yoki ?key=...)
   const urlParams = new URLSearchParams(window.location.search);
-  const keyParam = urlParams.get('key') || urlParams.get('token');
-  if (keyParam) {
-    localStorage.setItem('toyona_access_key', keyParam.trim());
+  const tokenParam = urlParams.get('token');
+  const keyParam = urlParams.get('key');
+  if (tokenParam) localStorage.setItem('toyona_token', tokenParam.trim());
+  if (keyParam) localStorage.setItem('toyona_access_key', keyParam.trim());
+  if (tokenParam || keyParam) {
     try {
       const cleanUrl = window.location.pathname + window.location.hash;
       window.history.replaceState({}, document.title, cleanUrl);
@@ -84,50 +86,215 @@
   const allGiftKg = () => state.gifts.reduce((s,g)=>s+meatKg(g),0);
   const allGiftDollars = () => state.gifts.reduce((s,g)=>s+dollarKg(g),0);
 
-  function promptAccessKey() {
-    const tgBotLink = 'https://t.me/Orifxon_assistantbot?start=toyona';
-    openModal('🔑 To‘yona daftarchasiga kirish', `
-      <div style="text-align:center;padding:4px 0 12px;">
-        <div style="font-size:32px;margin-bottom:6px;">💒</div>
-        <p class="muted" style="font-size:13.5px;line-height:1.5;margin:0 0 14px;">To‘yona daftarchangizga kirish uchun quyidagi qulay usuldan foydalaning:</p>
-        <a href="${tgBotLink}" target="_blank" class="btn primary full" style="display:flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;padding:12px;font-weight:600;margin-bottom:14px;border-radius:10px;">
-          <span>📲</span> Telegram orqali bitta bosishda kirish
-        </a>
-        <div style="display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;margin-bottom:12px;">
-          <span style="flex:1;height:1px;background:var(--line,#e0e6e2);"></span>
-          <span>YOKI SHAXSIY KALIT BILAN</span>
-          <span style="flex:1;height:1px;background:var(--line,#e0e6e2);"></span>
+  let currentAuthTab = 'login';
+
+  function renderAuthScreen(tab = currentAuthTab, errorMsg = '') {
+    currentAuthTab = tab;
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) logoutBtn.style.display = 'none';
+    const bottomNav = document.querySelector('.bottom-nav');
+    if (bottomNav) bottomNav.style.display = 'none';
+    const greeting = document.getElementById('greeting');
+    if (greeting) greeting.textContent = 'Hisobingizga kiring';
+
+    app.innerHTML = `
+      <div style="max-width:440px;margin:20px auto 30px;">
+        <div class="card" style="padding:24px 20px;">
+          <div style="text-align:center;margin-bottom:20px;">
+            <div style="font-size:44px;margin-bottom:6px;">💒</div>
+            <h2 style="margin:0 0 6px;color:var(--green);font-size:22px;">To‘yona Hisobi</h2>
+            <p class="muted" style="margin:0;font-size:13.5px;">To‘y va to‘yona hisob-kitoblari shaxsiy daftarchasi</p>
+          </div>
+
+          <div style="display:flex;background:var(--card-soft,#f1f5f3);padding:4px;border-radius:10px;margin-bottom:18px;border:1px solid var(--line,#e3eae5);">
+            <button type="button" class="btn small ${tab==='login'?'primary':'secondary'}" id="authTabLogin" style="flex:1;">Kirish</button>
+            <button type="button" class="btn small ${tab==='register'?'primary':'secondary'}" id="authTabRegister" style="flex:1;">Yangi akkaunt</button>
+          </div>
+
+          ${errorMsg ? `<div style="background:var(--btn-danger-bg,#fee);color:var(--red,#c33);padding:10px 14px;border-radius:8px;font-size:13.5px;margin-bottom:14px;border:1px solid rgba(200,0,0,0.15);">⚠️ ${esc(errorMsg)}</div>` : ''}
+
+          ${tab === 'login' ? `
+            <form id="authLoginForm">
+              <div class="field">
+                <label for="inputLogin">Login</label>
+                <input id="inputLogin" type="text" placeholder="Masalan: orifxon" autocomplete="username" required>
+              </div>
+              <div class="field" style="margin-top:12px;">
+                <label for="inputPassword">Parol</label>
+                <input id="inputPassword" type="password" placeholder="Parolingizni kiriting" autocomplete="current-password" required>
+              </div>
+              <button type="submit" class="btn primary full" id="authLoginSubmit" style="margin-top:18px;padding:12px;font-weight:600;font-size:15px;">
+                Tizimga kirish ›
+              </button>
+              <p class="note" style="margin-top:14px;text-align:center;">💡 Standart login: <code>orifxon</code>, parol: <code>orifxon</code></p>
+            </form>
+          ` : `
+            <form id="authRegisterForm">
+              <div class="field">
+                <label for="inputRegName">Ismingiz</label>
+                <input id="inputRegName" type="text" placeholder="Masalan: Sardor" required>
+              </div>
+              <div class="field" style="margin-top:12px;">
+                <label for="inputRegLogin">Login (kamida 3 ta belgi)</label>
+                <input id="inputRegLogin" type="text" placeholder="Masalan: sardor01" autocomplete="username" required>
+              </div>
+              <div class="field" style="margin-top:12px;">
+                <label for="inputRegPassword">Parol (kamida 4 ta belgi)</label>
+                <input id="inputRegPassword" type="password" placeholder="Parol o‘ylab toping" autocomplete="new-password" required>
+              </div>
+              <div class="field" style="margin-top:12px;">
+                <label for="inputRegTg">Telegram username (ixtiyoriy)</label>
+                <input id="inputRegTg" type="text" placeholder="@username (Excel hisobotlar uchun)">
+              </div>
+              <button type="submit" class="btn primary full" id="authRegisterSubmit" style="margin-top:18px;padding:12px;font-weight:600;font-size:15px;">
+                Akkaunt yaratish va kirish ›
+              </button>
+            </form>
+          `}
         </div>
       </div>
-      <div class="field">
-        <label for="inputAuthKey">Shaxsiy kirish kaliti / PIN</label>
-        <input id="inputAuthKey" type="text" placeholder="Masalan: orifxon yoki shaxsiy kalit" value="${localStorage.getItem('toyona_access_key') || ''}" required>
-      </div>
-      <p class="note" style="margin-top:8px;">💡 Agar kalitingizni bilmasangiz, yuqoridagi <b>Telegram orqali kirish</b> tugmasini bosing va o‘z daftarchangiz ichidan shaxsiy havolangizni oling.</p>
-    `, async () => {
-      const val = (document.getElementById('inputAuthKey')?.value || '').trim();
-      if (!val) throw new Error('Kalit so‘zni kiriting.');
-      localStorage.setItem('toyona_access_key', val);
-      toast('Kalit saqlandi, yuklanmoqda...');
+    `;
+
+    document.getElementById('authTabLogin')?.addEventListener('click', () => renderAuthScreen('login'));
+    document.getElementById('authTabRegister')?.addEventListener('click', () => renderAuthScreen('register'));
+    document.getElementById('authLoginForm')?.addEventListener('submit', handleLogin);
+    document.getElementById('authRegisterForm')?.addEventListener('submit', handleRegister);
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    const login = (document.getElementById('inputLogin')?.value || '').trim();
+    const password = (document.getElementById('inputPassword')?.value || '').trim();
+    const submitBtn = document.getElementById('authLoginSubmit');
+    if (!login || !password) return;
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Kirilmoqda...';
+    }
+    try {
+      const res = await api('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ login, password })
+      });
+      if (res.token) {
+        localStorage.setItem('toyona_token', res.token);
+      }
+      if (res.user?.access_key) {
+        localStorage.setItem('toyona_access_key', res.user.access_key);
+      }
+      toast('✓ Xush kelibsiz!');
       await load(true);
-    }, 'Kirish');
+    } catch (err) {
+      renderAuthScreen('login', err.message);
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Tizimga kirish ›';
+      }
+    }
+  }
+
+  async function handleRegister(e) {
+    e.preventDefault();
+    const name = (document.getElementById('inputRegName')?.value || '').trim();
+    const login = (document.getElementById('inputRegLogin')?.value || '').trim();
+    const password = (document.getElementById('inputRegPassword')?.value || '').trim();
+    const tgUsername = (document.getElementById('inputRegTg')?.value || '').trim();
+    const submitBtn = document.getElementById('authRegisterSubmit');
+
+    if (!name || !login || !password) return;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Akkaunt yaratilmoqda...';
+    }
+    try {
+      const res = await api('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ name, login, password, tgUsername })
+      });
+      if (res.token) {
+        localStorage.setItem('toyona_token', res.token);
+      }
+      if (res.user?.access_key) {
+        localStorage.setItem('toyona_access_key', res.user.access_key);
+      }
+      toast('✓ Yangi akkaunt ochildi! Xush kelibsiz.');
+      await load(true);
+    } catch (err) {
+      renderAuthScreen('register', err.message);
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Akkaunt yaratish va kirish ›';
+      }
+    }
+  }
+
+  async function doLogout() {
+    openModal('🚪 Hisobdan chiqish', `
+      <p>Haqiqatan ham hisobingizdan chiqmoqchimisiz?</p>
+      <p class="muted">Keyingi safar kirish uchun login va parolingizni kiritishingiz kerak bo‘ladi.</p>
+    `, async () => {
+      try {
+        await api('/api/auth/logout', { method: 'POST' });
+      } catch {}
+      localStorage.removeItem('toyona_token');
+      localStorage.removeItem('toyona_access_key');
+      state.user = null;
+      toast('Hisobdan chiqildi.');
+      renderAuthScreen('login');
+    }, 'Ha, chiqish');
+  }
+
+  function changePasswordModal() {
+    openModal('🔒 Parolni o‘zgartirish', `
+      <div class="field">
+        <label for="oldPwdInput">Eski parol</label>
+        <input id="oldPwdInput" type="password" placeholder="Hozirgi parolingiz" required>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label for="newPwdInput">Yangi parol (kamida 4 ta belgi)</label>
+        <input id="newPwdInput" type="password" placeholder="Yangi parol" required>
+      </div>
+    `, async () => {
+      const oldPassword = document.getElementById('oldPwdInput')?.value || '';
+      const newPassword = document.getElementById('newPwdInput')?.value || '';
+      if (!newPassword || newPassword.length < 4) throw new Error('Yangi parol kamida 4 ta belgidan iborat bo‘lishi kerak.');
+      await api('/api/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ oldPassword, newPassword })
+      });
+      toast('✅ Parol muvaffaqiyatli yangilandi!');
+    }, 'O‘zgartirish');
   }
 
   async function api(url, options={}) {
     const headers = {'Content-Type':'application/json', ...(options.headers||{})};
-    if (tg?.initData) headers['X-Telegram-Init-Data'] = tg.initData;
+    const token = localStorage.getItem('toyona_token');
+    if (token) {
+      headers['X-Toyona-Token'] = token;
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     const accessKey = localStorage.getItem('toyona_access_key');
     if (accessKey) {
       headers['X-Toyona-Key'] = accessKey;
     }
+    if (tg?.initData) {
+      headers['X-Telegram-Init-Data'] = tg.initData;
+    }
+
     const response = await fetch(url, {...options, headers});
     const type = response.headers.get('content-type')||'';
     if (!response.ok) {
       let data = {};
       try { data = await response.json(); } catch {}
       if (response.status === 401 && data.auth_required) {
-        promptAccessKey();
-        throw new Error(data.message || 'Kirish parolini kiriting.');
+        localStorage.removeItem('toyona_token');
+        localStorage.removeItem('toyona_access_key');
+        state.user = null;
+        renderAuthScreen('login', data.message || 'Davom etish uchun tizimga kiring.');
+        throw new Error(data.message || 'Kirish talab etiladi.');
       }
       throw new Error(data.error || 'Xatolik yuz berdi.');
     }
@@ -135,6 +302,15 @@
   }
 
   async function load(showLoading=true) {
+    const token = localStorage.getItem('toyona_token');
+    const key = localStorage.getItem('toyona_access_key');
+    const isTg = Boolean(window.Telegram?.WebApp?.initData);
+
+    if (!token && !key && !isTg) {
+      renderAuthScreen('login');
+      return;
+    }
+
     if (showLoading) app.innerHTML='<div class="loading"><span class="spinner"></span> Ma’lumotlar yuklanmoqda...</div>';
     try {
       const data = await api('/api/bootstrap');
@@ -142,11 +318,18 @@
       if (state.user?.access_key) {
         localStorage.setItem('toyona_access_key', state.user.access_key);
       }
+      const logoutBtn = document.getElementById('logoutBtn');
+      if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+      const bottomNav = document.querySelector('.bottom-nav');
+      if (bottomNav) bottomNav.style.display = 'flex';
+
       const first = state.user?.first_name ? `${state.user.first_name}, xush kelibsiz!` : 'Hisob-kitoblaringiz bir joyda';
       document.getElementById('greeting').textContent = first;
       render();
     } catch (e) {
-      app.innerHTML=`<div class="empty"><div class="empty-icon">☁️</div><b>Ulanib bo‘lmadi</b><p>${esc(e.message)}</p><div style="display:flex;gap:8px;justify-content:center;margin-top:12px"><button class="btn primary" id="retryBtn">Qayta urinish</button><button class="btn secondary" id="keyBtn">🔑 Parolni kiritish</button></div><p class="note" style="margin-top:12px">Mini App’ni Telegram bot orqali oching yoki to‘g‘ridan-to‘g‘ri havoladan kiring.</p></div>`;
+      if (e.message !== 'Kirish talab etiladi.') {
+        renderAuthScreen('login', e.message);
+      }
     }
   }
 
@@ -390,17 +573,21 @@
         <p class="note" style="margin-top:10px">💡 <b>Telegram botga yuborish</b> orqali chiroyli Excel fayli to‘g‘ridan-to‘g‘ri shaxsiy botingizga yuboriladi!</p>
       </div>
       <div class="card">
-        <div class="card-title">🌐 Kompyuter yoki brauzerda ochish</div>
-        <p class="muted">To‘yona daftarchangizni kompyuter yoki telefon brauzerida ochish uchun shaxsiy havolangiz:</p>
+        <div class="card-title">👤 Shaxsiy hisob</div>
+        <p class="muted">Foydalanuvchi: <b>${esc(state.user?.first_name || 'Foydalanuvchi')}</b> · Login: <code>${esc(state.user?.login || 'orifxon')}</code></p>
+        <div class="action-row" style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn secondary" data-action="change-password">🔒 Parolni o‘zgartirish</button>
+          <button class="btn secondary danger" data-action="do-logout">🚪 Hisobdan chiqish</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">🌐 Ilovani ulashish (Sayt manzili)</div>
+        <p class="muted">To‘yona hisobi ilovasi havolasini do‘stlarga yuborish yoki yangi qurilmada ochish:</p>
         <div style="display:flex;gap:8px;margin-top:12px;">
-          <input type="text" id="personalWebLink" readonly value="${window.location.origin}/?key=${encodeURIComponent(state.user?.access_key || localStorage.getItem('toyona_access_key') || 'orifxon')}" style="flex:1;font-size:12px;padding:8px 10px;background:var(--input-bg,#f3f6f4);border:1px solid var(--line,#dce4e0);border-radius:8px;">
+          <input type="text" id="personalWebLink" readonly value="${window.location.origin}" style="flex:1;font-size:13px;padding:8px 10px;background:var(--input-bg,#f3f6f4);border:1px solid var(--line,#dce4e0);border-radius:8px;">
           <button class="btn secondary" data-action="copy-personal-link">Nusxalash</button>
         </div>
-        <div class="card-row" style="margin-top:12px;">
-          <span class="muted">Shaxsiy kalitingiz: <b>${esc(state.user?.access_key || localStorage.getItem('toyona_access_key') || 'orifxon')}</b></span>
-          <button class="btn secondary small" data-action="change-personal-key">✎ Kalitni o‘zgartirish</button>
-        </div>
-        <p class="note" style="margin-top:10px">💡 Ushbu havolani kompyuteringizda ochsangiz, parolsiz to‘g‘ridan-to‘g‘ri shaxsiy daftarchangiz ochiladi.</p>
+        <p class="note" style="margin-top:10px">💡 Ushbu havola orqali istalgan do‘stingiz kirib, <b>Yangi akkaunt</b> ochib, o‘zining to‘yona daftarchasini boshlashi mumkin. Har bir foydalanuvchining ma’lumotlari mutlaqo alohida va xavfsiz saqlanadi.</p>
       </div>`;
   }
 
@@ -642,8 +829,10 @@
   }
 
   function getDownloadUrl(endpoint, filename) {
-    const accessKey = localStorage.getItem('toyona_access_key') || 'orifxon';
+    const token = localStorage.getItem('toyona_token');
+    const accessKey = localStorage.getItem('toyona_access_key') || '';
     const params = new URLSearchParams();
+    if (token) params.set('token', token);
     if (accessKey) params.set('key', accessKey);
     if (tg?.initData) params.set('initData', tg.initData);
     params.set('t', String(Date.now()));
@@ -840,19 +1029,19 @@
         }
       }
       else if (a === 'send-telegram-report') await sendTelegramReport(el);
+      else if (a === 'do-logout') await doLogout();
+      else if (a === 'change-password') changePasswordModal();
       else if (a === 'copy-personal-link') {
-        const key = state.user?.access_key || localStorage.getItem('toyona_access_key') || 'orifxon';
-        const link = `${window.location.origin}/?key=${encodeURIComponent(key)}`;
+        const link = window.location.origin;
         if (navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(link).then(() => toast('✅ Shaxsiy havola nusxalandi!')).catch(() => {});
+          navigator.clipboard.writeText(link).then(() => toast('✅ Havola nusxalandi!')).catch(() => {});
         } else {
           const inp = document.getElementById('personalWebLink');
           inp?.select();
           document.execCommand('copy');
-          toast('✅ Shaxsiy havola nusxalandi!');
+          toast('✅ Havola nusxalandi!');
         }
       }
-      else if (a === 'change-personal-key') changePersonalKey();
       else if (a === 'go-reports') setPage('reports');
     } catch (err) { fail(err); }
   });
@@ -930,6 +1119,7 @@
 
   document.getElementById('refreshBtn')?.addEventListener('click', () => load(true));
   document.getElementById('themeToggleBtn')?.addEventListener('click', toggleTheme);
+  document.getElementById('logoutBtn')?.addEventListener('click', doLogout);
 
   document.addEventListener('click', e => {
     if (e.target.id === 'retryBtn') load(true);

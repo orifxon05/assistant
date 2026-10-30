@@ -45,7 +45,29 @@ function validateTelegramInitData(initData) {
 const DEFAULT_ACCESS_KEY = (process.env.TOYONA_ACCESS_KEY || 'orifxon').toLowerCase().trim();
 const ADMIN_ID = String(process.env.ADMIN_ID || '7813512925').trim();
 
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored || !stored.includes(':')) return false;
+  const [salt, hash] = stored.split(':');
+  const testHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return testHash === hash;
+}
+
 async function auth(req, res, next) {
+  // Public routes that do not require authentication
+  if (
+    req.path === '/health' ||
+    req.path === '/auth/login' ||
+    req.path === '/auth/register' ||
+    req.path === '/auth/logout'
+  ) {
+    return next();
+  }
+
   try {
     let user = null;
 
@@ -53,22 +75,50 @@ async function auth(req, res, next) {
       user = {
         id: ADMIN_ID,
         first_name: 'Orifxon',
-        username: 'orifxon05'
+        username: 'orifxon05',
+        login: 'orifxon',
+        access_key: 'orifxon'
       };
     } else {
-      // 1. Check Telegram WebApp initData (from Telegram Mini App)
-      const initData = req.get('X-Telegram-Init-Data') || req.query.initData || req.query.tgWebAppInitData;
-      if (initData) {
-        user = validateTelegramInitData(initData);
+      // 1. Session token from X-Toyona-Token or Authorization Bearer header
+      const token = (
+        req.get('X-Toyona-Token') ||
+        (req.get('Authorization') || '').replace(/^Bearer\s+/i, '') ||
+        req.query.token ||
+        ''
+      ).trim();
+
+      if (token) {
+        const sessUser = await query(
+          'SELECT telegram_id, first_name, username, login, access_key FROM app_users WHERE session_token=$1',
+          [token]
+        );
+        if (sessUser.rowCount) {
+          const u = sessUser.rows[0];
+          user = {
+            id: String(u.telegram_id),
+            first_name: u.first_name || '',
+            username: u.username || '',
+            login: u.login || '',
+            access_key: u.access_key || ''
+          };
+        }
       }
 
-      // 2. Check Web link access key / token / PIN (for opening via direct link in any browser/phone)
+      // 2. Check Telegram WebApp initData (from Telegram Mini App)
+      if (!user) {
+        const initData = req.get('X-Telegram-Init-Data') || req.query.initData || req.query.tgWebAppInitData;
+        if (initData) {
+          user = validateTelegramInitData(initData);
+        }
+      }
+
+      // 3. Fallback direct access key (for direct links or backwards compatibility)
       if (!user) {
         const rawKey = String(
           req.get('X-Toyona-Key') ||
           req.get('X-Toyona-Auth') ||
           req.query.key ||
-          req.query.token ||
           req.body?.authKey ||
           ''
         ).trim();
@@ -80,12 +130,14 @@ async function auth(req, res, next) {
             user = {
               id: ADMIN_ID,
               first_name: 'Orifxon',
-              username: 'orifxon05'
+              username: 'orifxon05',
+              login: 'orifxon',
+              access_key: 'orifxon'
             };
           } else {
-            // Find user by their personal access_key or telegram_id
+            // Find user by their personal access_key or login
             const dbUser = await query(
-              'SELECT telegram_id, first_name, username, access_key FROM app_users WHERE access_key=$1 OR LOWER(access_key)=$2 OR telegram_id::text=$1 LIMIT 1',
+              'SELECT telegram_id, first_name, username, login, access_key FROM app_users WHERE access_key=$1 OR LOWER(access_key)=$2 OR LOWER(login)=$2 LIMIT 1',
               [rawKey, lowerKey]
             );
             if (dbUser.rowCount) {
@@ -94,6 +146,7 @@ async function auth(req, res, next) {
                 id: String(u.telegram_id),
                 first_name: u.first_name || '',
                 username: u.username || '',
+                login: u.login || '',
                 access_key: u.access_key || rawKey
               };
             }
@@ -103,9 +156,9 @@ async function auth(req, res, next) {
 
       if (!user) {
         return res.status(401).json({
-          error: 'Kirish uchun ruxsat berilmadi.',
+          error: 'Tizimga kirish talab etiladi.',
           auth_required: true,
-          message: 'Mini App’ni Telegram orqali oching yoki shaxsiy kirish kalitingizni kiriting.'
+          message: 'Davom etish uchun login va parolingizni kiriting.'
         });
       }
     }
@@ -113,21 +166,31 @@ async function auth(req, res, next) {
     req.user = user;
 
     // Check or create access_key for this user
-    const existing = await query('SELECT telegram_id, access_key FROM app_users WHERE telegram_id=$1', [req.user.id]);
+    const existing = await query('SELECT telegram_id, access_key, login, password_hash FROM app_users WHERE telegram_id=$1', [req.user.id]);
     let userKey = existing.rows[0]?.access_key;
     if (!existing.rowCount) {
       userKey = (req.user.id === ADMIN_ID) ? 'orifxon' : ('toy_' + crypto.randomBytes(4).toString('hex'));
+      const defaultLogin = (req.user.id === ADMIN_ID) ? 'orifxon' : (req.user.username || userKey);
       await query(
-        `INSERT INTO app_users(telegram_id, first_name, username, access_key) VALUES($1,$2,$3,$4)
+        `INSERT INTO app_users(telegram_id, first_name, username, login, access_key) VALUES($1,$2,$3,$4,$5)
          ON CONFLICT(telegram_id) DO UPDATE SET first_name=EXCLUDED.first_name, username=EXCLUDED.username`,
-        [req.user.id, req.user.first_name, req.user.username, userKey]
+        [req.user.id, req.user.first_name, req.user.username, defaultLogin, userKey]
       );
     } else if (!userKey) {
       userKey = (req.user.id === ADMIN_ID) ? 'orifxon' : ('toy_' + crypto.randomBytes(4).toString('hex'));
       await query('UPDATE app_users SET access_key=$1 WHERE telegram_id=$2', [userKey, req.user.id]);
     }
-    req.user.access_key = userKey;
 
+    // Ensure Orifxon has login='orifxon' and default password if empty
+    if (req.user.id === ADMIN_ID && (!existing.rows[0]?.login || !existing.rows[0]?.password_hash)) {
+      const defaultHash = hashPassword('orifxon');
+      await query(
+        `UPDATE app_users SET login='orifxon', password_hash=COALESCE(password_hash, $1), access_key='orifxon' WHERE telegram_id=$2`,
+        [defaultHash, ADMIN_ID]
+      );
+    }
+
+    req.user.access_key = userKey;
     await query(`INSERT INTO settings(telegram_id) VALUES($1) ON CONFLICT(telegram_id) DO NOTHING`, [req.user.id]);
     next();
   } catch (e) {
@@ -154,6 +217,158 @@ const asyncHandler = fn => (req, res, next) => {
 };
 
 const own = (table, id, owner) => query(`SELECT * FROM ${table} WHERE id=$1 AND telegram_id=$2`, [id, owner]);
+
+app.post('/api/auth/register', asyncHandler(async (req, res) => {
+  const name = String(req.body.name || '').trim();
+  const login = String(req.body.login || '').toLowerCase().trim();
+  const password = String(req.body.password || '');
+  const tgUsername = String(req.body.tgUsername || '').replace(/^@/, '').trim();
+
+  if (!name || name.length < 2 || name.length > 50) {
+    return res.status(400).json({ error: 'Ism 2–50 ta belgidan iborat bo‘lishi kerak.' });
+  }
+  if (!login || login.length < 3 || login.length > 32 || !/^[a-zA-Z0-9_.-]+$/.test(login)) {
+    return res.status(400).json({ error: 'Login 3–32 ta belgi (harf, raqam) bo‘lishi kerak.' });
+  }
+  if (!password || password.length < 4) {
+    return res.status(400).json({ error: 'Parol kamida 4 ta belgidan iborat bo‘lishi kerak.' });
+  }
+
+  const check = await query('SELECT telegram_id FROM app_users WHERE LOWER(login)=$1', [login]);
+  if (check.rowCount) {
+    return res.status(400).json({ error: 'Bu login band. Boshqa login tanlang.' });
+  }
+
+  const newId = Date.now() * 1000 + Math.floor(Math.random() * 1000);
+  const pwdHash = hashPassword(password);
+  const sessionToken = crypto.randomBytes(32).toString('hex');
+  const accessKey = 'toy_' + crypto.randomBytes(4).toString('hex');
+
+  await query(
+    `INSERT INTO app_users(telegram_id, first_name, username, login, password_hash, session_token, access_key)
+     VALUES($1, $2, $3, $4, $5, $6, $7)`,
+    [newId, name, tgUsername, login, pwdHash, sessionToken, accessKey]
+  );
+
+  await query(`INSERT INTO settings(telegram_id) VALUES($1) ON CONFLICT(telegram_id) DO NOTHING`, [newId]);
+
+  res.json({
+    ok: true,
+    token: sessionToken,
+    user: {
+      id: String(newId),
+      first_name: name,
+      username: tgUsername,
+      login: login,
+      access_key: accessKey
+    }
+  });
+}));
+
+app.post('/api/auth/login', asyncHandler(async (req, res) => {
+  const login = String(req.body.login || '').toLowerCase().trim();
+  const password = String(req.body.password || '');
+
+  if (!login || !password) {
+    return res.status(400).json({ error: 'Login va parolni kiriting.' });
+  }
+
+  // Check Orifxon master login
+  if (login === 'orifxon' || login === '7813' || login === '7813512925') {
+    const orifRow = await query('SELECT * FROM app_users WHERE telegram_id=$1', [ADMIN_ID]);
+    let orifUser = orifRow.rows[0];
+    if (!orifUser || !orifUser.password_hash) {
+      const defaultHash = hashPassword('orifxon');
+      await query(
+        `INSERT INTO app_users(telegram_id, first_name, username, login, password_hash, access_key)
+         VALUES($1, 'Orifxon', 'orifxon05', 'orifxon', $2, 'orifxon')
+         ON CONFLICT(telegram_id) DO UPDATE SET login='orifxon', password_hash=COALESCE(app_users.password_hash, $2), access_key='orifxon'`,
+        [ADMIN_ID, defaultHash]
+      );
+      const refetch = await query('SELECT * FROM app_users WHERE telegram_id=$1', [ADMIN_ID]);
+      orifUser = refetch.rows[0];
+    }
+
+    const isValid = verifyPassword(password, orifUser.password_hash) || (password === 'orifxon');
+    if (!isValid) {
+      return res.status(400).json({ error: 'Login yoki parol noto‘g‘ri.' });
+    }
+
+    const sessionToken = crypto.randomBytes(32).toString('hex');
+    await query('UPDATE app_users SET session_token=$1 WHERE telegram_id=$2', [sessionToken, ADMIN_ID]);
+
+    return res.json({
+      ok: true,
+      token: sessionToken,
+      user: {
+        id: String(ADMIN_ID),
+        first_name: orifUser.first_name || 'Orifxon',
+        username: orifUser.username || 'orifxon05',
+        login: 'orifxon',
+        access_key: orifUser.access_key || 'orifxon'
+      }
+    });
+  }
+
+  // Regular user login
+  const userRes = await query(
+    'SELECT telegram_id, first_name, username, login, password_hash, access_key FROM app_users WHERE LOWER(login)=$1 OR LOWER(username)=$1 LIMIT 1',
+    [login]
+  );
+
+  if (!userRes.rowCount) {
+    return res.status(400).json({ error: 'Login yoki parol noto‘g‘ri.' });
+  }
+
+  const u = userRes.rows[0];
+  if (!verifyPassword(password, u.password_hash)) {
+    return res.status(400).json({ error: 'Login yoki parol noto‘g‘ri.' });
+  }
+
+  const sessionToken = crypto.randomBytes(32).toString('hex');
+  await query('UPDATE app_users SET session_token=$1 WHERE telegram_id=$2', [sessionToken, u.telegram_id]);
+
+  res.json({
+    ok: true,
+    token: sessionToken,
+    user: {
+      id: String(u.telegram_id),
+      first_name: u.first_name,
+      username: u.username,
+      login: u.login,
+      access_key: u.access_key
+    }
+  });
+}));
+
+app.post('/api/auth/logout', asyncHandler(async (req, res) => {
+  const token = (
+    req.get('X-Toyona-Token') ||
+    (req.get('Authorization') || '').replace(/^Bearer\s+/i, '') ||
+    req.body?.token ||
+    ''
+  ).trim();
+  if (token) {
+    await query('UPDATE app_users SET session_token=NULL WHERE session_token=$1', [token]);
+  }
+  res.json({ ok: true });
+}));
+
+app.post('/api/auth/change-password', asyncHandler(async (req, res) => {
+  const oldPwd = String(req.body.oldPassword || '');
+  const newPwd = String(req.body.newPassword || '');
+  if (!newPwd || newPwd.length < 4) {
+    return res.status(400).json({ error: 'Yangi parol kamida 4 ta belgidan iborat bo‘lishi kerak.' });
+  }
+  const userRes = await query('SELECT password_hash FROM app_users WHERE telegram_id=$1', [req.user.id]);
+  const stored = userRes.rows[0]?.password_hash;
+  if (stored && !verifyPassword(oldPwd, stored) && !(req.user.id === ADMIN_ID && oldPwd === 'orifxon')) {
+    return res.status(400).json({ error: 'Eski parol noto‘g‘ri kiritildi.' });
+  }
+  const newHash = hashPassword(newPwd);
+  await query('UPDATE app_users SET password_hash=$1 WHERE telegram_id=$2', [newHash, req.user.id]);
+  res.json({ ok: true, message: 'Parol muvaffaqiyatli o‘zgartirildi.' });
+}));
 
 app.get('/api/bootstrap', asyncHandler(async (req, res) => {
   const owner = req.user.id;

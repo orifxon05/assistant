@@ -104,8 +104,13 @@ async function initDb() {
     ALTER TABLE weddings ADD COLUMN IF NOT EXISTS calc_type TEXT NOT NULL DEFAULT 'both';
     ALTER TABLE gifts ADD COLUMN IF NOT EXISTS dollar_rate BIGINT NOT NULL DEFAULT 12800;
     ALTER TABLE app_users ADD COLUMN IF NOT EXISTS access_key TEXT;
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS login TEXT;
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS password_hash TEXT;
+    ALTER TABLE app_users ADD COLUMN IF NOT EXISTS session_token TEXT;
     CREATE UNIQUE INDEX IF NOT EXISTS app_users_access_key_idx ON app_users(access_key) WHERE access_key IS NOT NULL;
-    UPDATE app_users SET access_key='orifxon' WHERE telegram_id=7813512925 AND (access_key IS NULL OR access_key='');
+    CREATE UNIQUE INDEX IF NOT EXISTS app_users_login_idx ON app_users(LOWER(login)) WHERE login IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS app_users_session_idx ON app_users(session_token) WHERE session_token IS NOT NULL;
+    UPDATE app_users SET access_key='orifxon', login='orifxon' WHERE telegram_id=7813512925 AND (login IS NULL OR login='');
   `);
 }
 
