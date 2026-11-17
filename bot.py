@@ -341,6 +341,7 @@ def build_menu_keyboard():
             ],
             [{"text": f"\U0001f3af Filtr: {mode_label}", "callback_data": "open_filter"}],
             toyona_btn,
+            [{"text": "🎨 Stiker bo‘limi (Sticker maker)", "callback_data": "stk_menu"}],
             [
                 {"text": "⚙️ Telegram sozlamalari", "callback_data": "open_tg_settings"}
             ],
@@ -2731,6 +2732,29 @@ async def handle_callback(callback_query):
     data = callback_query["data"]
     answer_callback(callback_query["id"])
 
+    if data.startswith("stk_"):
+        from sticker_manager import handle_sticker_callback
+        bot_username = os.getenv("BOT_USERNAME", "Orifxon_assistantbot")
+        await handle_sticker_callback(
+            chat_id=chat_id,
+            data=data,
+            callback_query=callback_query,
+            send_message_fn=send_message,
+            pending_actions=pending_actions,
+            bot_username=bot_username,
+            bot_token=TELEGRAM_TOKEN
+        )
+        return
+
+    if data == "confirm_profile_photo":
+        action = pending_actions.get(chat_id)
+        if action and action.get("local_path"):
+            success = await update_profile_photo_action(action["local_path"])
+            send_message(chat_id, "✅ Profil rasmi yangilandi." if success else "❌ Profil rasmini yangilashda xatolik yuz berdi.")
+            if chat_id in pending_actions:
+                del pending_actions[chat_id]
+        return
+
     if data == "trigger_ota_update":
         asyncio.create_task(perform_system_update_action(chat_id))
         return
@@ -3279,6 +3303,11 @@ async def bot_polling_loop():
                         )
                         continue
 
+                    if cmd_word in ["/stiker", "/sticker", "stiker", "sticker", "/stikerlar", "stikerlar"]:
+                        from sticker_manager import send_sticker_main_menu
+                        send_sticker_main_menu(chat_id, send_message)
+                        continue
+
                     if cmd_word in ["/toyona", "toyona"]:
                         from toyona_manager import get_toyona_webapp_url
                         webapp_url = get_toyona_webapp_url()
@@ -3369,29 +3398,97 @@ async def bot_polling_loop():
                         send_message(chat_id, reply_text)
                         continue
 
-                    if "photo" in msg:
+                    is_image_doc = "document" in msg and msg.get("document", {}).get("mime_type", "").startswith("image/")
+                    if "photo" in msg or is_image_doc:
                         print("Rasm keldi")
-                        file_id = msg["photo"][-1]["file_id"]
-                        local_path = await download_telegram_photo(file_id)
-                        if local_path:
+                        file_id = msg["photo"][-1]["file_id"] if "photo" in msg else msg["document"]["file_id"]
+                        
+                        pending = pending_actions.get(chat_id)
+                        if pending and pending.get("type") == "stk_awaiting_photo":
+                            mode = pending.get("mode", "static")
+                            del pending_actions[chat_id]
+                            send_message(chat_id, "⏳ Rasm yuklab olinmoqda va tayyorlanmoqda...")
+                            from sticker_manager import api_download_file, TEMP_STICKER_STORAGE, get_sticker_style_keyboard, get_gif_style_keyboard
+                            photo_bytes, err = api_download_file(file_id, bot_token=TELEGRAM_TOKEN)
+                            if not photo_bytes:
+                                send_message(chat_id, f"❌ Rasmni yuklab olishda xatolik: {err}")
+                                continue
+                            import time as _t
+                            temp_key = f"{int(_t.time())}_{chat_id}"
+                            TEMP_STICKER_STORAGE[temp_key] = photo_bytes
+                            if mode == "gif":
+                                send_message(
+                                    chat_id,
+                                    "🎞️ <b>GIF animatsiya turini tanlang:</b>\n\nRasmingizga qanday animatsion harakat qo‘shilsin?",
+                                    get_gif_style_keyboard(temp_key),
+                                    parse_mode="HTML"
+                                )
+                            else:
+                                send_message(
+                                    chat_id,
+                                    "🎨 <b>Stiker uslubini tanlang:</b>\n\nQaysi ko‘rinishdagi stiker yasalsin?",
+                                    get_sticker_style_keyboard(temp_key),
+                                    parse_mode="HTML"
+                                )
+                            continue
+                        else:
+                            # User sent photo without prior menu: smart options
+                            from sticker_manager import api_download_file, TEMP_STICKER_STORAGE
+                            photo_bytes, _ = api_download_file(file_id, bot_token=TELEGRAM_TOKEN)
+                            import time as _t
+                            temp_key = f"{int(_t.time())}_{chat_id}"
+                            if photo_bytes:
+                                TEMP_STICKER_STORAGE[temp_key] = photo_bytes
+                            
+                            local_path = await download_telegram_photo(file_id)
                             pending_actions[chat_id] = {
                                 "type": "update_profile_photo",
                                 "local_path": local_path,
+                                "temp_key": temp_key
                             }
-                            confirm_keyboard = {
-                                "inline_keyboard": [[
-                                    {"text": "✅ Ha", "callback_data": "confirm_yes"},
-                                    {"text": "❌ Yo'q", "callback_data": "confirm_no"}
-                                ]]
+                            options_keyboard = {
+                                "inline_keyboard": [
+                                    [{"text": "🎨 Stiker qilish", "callback_data": f"stk_apply_circle_{temp_key}"}],
+                                    [{"text": "🎞️ GIF stiker qilish", "callback_data": f"stk_gif_pulse_{temp_key}"}],
+                                    [{"text": "🖼️ Profil rasmi qilish", "callback_data": "confirm_yes"}],
+                                    [{"text": "❌ Bekor qilish", "callback_data": "stk_cancel"}]
+                                ]
                             }
                             send_message(
                                 chat_id,
-                                "Rasm qabul qilindi. Profil rasmingizni shu rasmga almashtirishni xohlaysizmi?",
-                                confirm_keyboard
+                                "📸 <b>Rasm qabul qilindi!</b>\n\nUshbu rasm bilan nima qilmoqchisiz?",
+                                options_keyboard,
+                                parse_mode="HTML"
                             )
-                        else:
-                            send_message(chat_id, "Rasmni yuklab olishda xatolik yuz berdi.")
-                        continue
+                            continue
+
+                    if "voice" in msg or "audio" in msg:
+                        pending = pending_actions.get(chat_id)
+                        if pending and pending.get("type") == "stk_awaiting_voice":
+                            voice_obj = msg.get("voice") or msg.get("audio")
+                            voice_file_id = voice_obj.get("file_id")
+                            duration = voice_obj.get("duration", 0)
+                            stk_id = pending.get("stk_id")
+                            stk_file_id = pending.get("stk_file_id")
+                            del pending_actions[chat_id]
+
+                            from sticker_manager import save_sound_sticker_pair, send_sound_sticker_pair
+                            pair = save_sound_sticker_pair(
+                                sticker_file_id=stk_file_id,
+                                voice_file_id=voice_file_id,
+                                title=f"Stiker #{str(stk_id)[-4:]}",
+                                emoji="🎙️",
+                                duration=duration
+                            )
+
+                            send_message(
+                                chat_id,
+                                "🎉 <b>Ovozli stiker muvaffaqiyatli saqlandi!</b>\n\n"
+                                "Quyida stiker va ovozingiz birgalikda sinab ko‘rsatilmoqda:",
+                                parse_mode="HTML"
+                            )
+                            send_sound_sticker_pair(chat_id, pair["id"], bot_token=TELEGRAM_TOKEN)
+                            continue
 
                     if text:
                         print(f"Xabar keldi: {text}")

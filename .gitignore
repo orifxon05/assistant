@@ -35,4 +35,9 @@ upload_to_github.py
 get_contacts.py
 telethon_test.py
 
+# Generated sticker binary files
+stickers/*.png
+stickers/*.webp
+stickers/*.gif
+
 
