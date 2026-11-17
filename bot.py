@@ -3403,54 +3403,53 @@ async def bot_polling_loop():
                         print("Rasm keldi")
                         file_id = msg["photo"][-1]["file_id"] if "photo" in msg else msg["document"]["file_id"]
                         
+                        from sticker_manager import api_download_file, get_temp_photo_path, get_sticker_style_keyboard, get_gif_style_keyboard
+                        send_message(chat_id, "⏳ Rasm yuklab olinmoqda va tahlil qilinmoqda...")
+                        photo_bytes, err = api_download_file(file_id, bot_token=TELEGRAM_TOKEN)
+                        if not photo_bytes:
+                            send_message(chat_id, f"❌ Rasmni yuklab olishda xatolik: {err}")
+                            continue
+
+                        temp_path = get_temp_photo_path(chat_id)
+                        with open(temp_path, "wb") as f:
+                            f.write(photo_bytes)
+
                         pending = pending_actions.get(chat_id)
                         if pending and pending.get("type") == "stk_awaiting_photo":
                             mode = pending.get("mode", "static")
                             del pending_actions[chat_id]
-                            send_message(chat_id, "⏳ Rasm yuklab olinmoqda va tayyorlanmoqda...")
-                            from sticker_manager import api_download_file, TEMP_STICKER_STORAGE, get_sticker_style_keyboard, get_gif_style_keyboard
-                            photo_bytes, err = api_download_file(file_id, bot_token=TELEGRAM_TOKEN)
-                            if not photo_bytes:
-                                send_message(chat_id, f"❌ Rasmni yuklab olishda xatolik: {err}")
-                                continue
-                            import time as _t
-                            temp_key = f"{int(_t.time())}_{chat_id}"
-                            TEMP_STICKER_STORAGE[temp_key] = photo_bytes
                             if mode == "gif":
                                 send_message(
                                     chat_id,
                                     "🎞️ <b>GIF animatsiya turini tanlang:</b>\n\nRasmingizga qanday animatsion harakat qo‘shilsin?",
-                                    get_gif_style_keyboard(temp_key),
+                                    get_gif_style_keyboard(),
                                     parse_mode="HTML"
                                 )
                             else:
                                 send_message(
                                     chat_id,
                                     "🎨 <b>Stiker uslubini tanlang:</b>\n\nQaysi ko‘rinishdagi stiker yasalsin?",
-                                    get_sticker_style_keyboard(temp_key),
+                                    get_sticker_style_keyboard(),
                                     parse_mode="HTML"
                                 )
                             continue
                         else:
-                            # User sent photo without prior menu: smart options
-                            from sticker_manager import api_download_file, TEMP_STICKER_STORAGE
-                            photo_bytes, _ = api_download_file(file_id, bot_token=TELEGRAM_TOKEN)
-                            import time as _t
-                            temp_key = f"{int(_t.time())}_{chat_id}"
-                            if photo_bytes:
-                                TEMP_STICKER_STORAGE[temp_key] = photo_bytes
-                            
                             local_path = await download_telegram_photo(file_id)
                             pending_actions[chat_id] = {
                                 "type": "update_profile_photo",
-                                "local_path": local_path,
-                                "temp_key": temp_key
+                                "local_path": local_path
                             }
                             options_keyboard = {
                                 "inline_keyboard": [
-                                    [{"text": "🎨 Stiker qilish", "callback_data": f"stk_apply_circle_{temp_key}"}],
-                                    [{"text": "🎞️ GIF stiker qilish", "callback_data": f"stk_gif_pulse_{temp_key}"}],
-                                    [{"text": "🖼️ Profil rasmi qilish", "callback_data": "confirm_yes"}],
+                                    [{"text": "✨ Obyektni qirqish + Kontur (Telegram stili)", "callback_data": "stk_apply_cutout"}],
+                                    [
+                                        {"text": "⚪ Dumaloq stiker", "callback_data": "stk_apply_circle"},
+                                        {"text": "📐 Asl ko‘rinish", "callback_data": "stk_apply_standard"}
+                                    ],
+                                    [
+                                        {"text": "🎞️ GIF stiker qilish", "callback_data": "stk_make_gif"},
+                                        {"text": "🖼️ Profil rasmi qilish", "callback_data": "confirm_profile_photo"}
+                                    ],
                                     [{"text": "❌ Bekor qilish", "callback_data": "stk_cancel"}]
                                 ]
                             }

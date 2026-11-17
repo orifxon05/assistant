@@ -3,6 +3,8 @@ import io
 import json
 import time
 import requests
+import cv2
+import numpy as np
 from PIL import Image, ImageDraw, ImageOps, ImageFilter
 
 STICKERS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stickers")
@@ -17,7 +19,8 @@ def ensure_sticker_dirs():
             "pack_title": "Orifxon Stikerlari",
             "pack_url": "",
             "stickers": [],
-            "sound_stickers": []
+            "sound_stickers": [],
+            "selected_emojis": {}
         }
         try:
             with open(DATA_FILE, "w", encoding="utf-8") as f:
@@ -29,14 +32,18 @@ def load_sticker_data():
     ensure_sticker_dirs()
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            if "selected_emojis" not in data:
+                data["selected_emojis"] = {}
+            return data
     except Exception:
         return {
             "pack_name": "",
             "pack_title": "Orifxon Stikerlari",
             "pack_url": "",
             "stickers": [],
-            "sound_stickers": []
+            "sound_stickers": [],
+            "selected_emojis": {}
         }
 
 def save_sticker_data(data):
@@ -48,111 +55,159 @@ def save_sticker_data(data):
     except Exception as e:
         print(f"[STICKER DATA SAVE ERROR]: {e}")
 
+def get_temp_photo_path(chat_id):
+    ensure_sticker_dirs()
+    return os.path.join(STICKERS_DIR, f"temp_{chat_id}.png")
+
+def get_current_sticker_path(chat_id):
+    ensure_sticker_dirs()
+    return os.path.join(STICKERS_DIR, f"current_{chat_id}.png")
+
 # ─────────────────────────────────────────────────────────────
-# 1. TASVIRNI STIKERGA AYLANTIRISH (STATIC STICKER)
+# 1. TASVIRNI TAHRIRLASH VA STIKERGA AYLANTIRISH
 # ─────────────────────────────────────────────────────────────
-def convert_to_sticker(image_bytes, style="circle"):
+
+def add_white_contour_to_cutout(cutout_rgba, contour_width=12):
     """
-    Rasmni Telegram stiker talabiga (512x512, shaffof fon, oq hoshiya) moslashtiradi.
+    Shaffof ob'yekt atrofida Telegram stikerlari kabi chiroyli oq kontur hosil qiladi.
+    """
+    max_size = 512 - (contour_width * 2 + 10)
+    cutout_rgba.thumbnail((max_size, max_size), Image.Resampling.LANCZOS)
+    cw, ch = cutout_rgba.size
+
+    alpha = cutout_rgba.split()[-1]
+    # Kontur uchun alpha maskani kengaytirish
+    dilated_mask = alpha.filter(ImageFilter.MaxFilter(contour_width * 2 + 1))
+
+    # Oq kontur qatlami
+    white_fill = Image.new("RGBA", (cw, ch), (255, 255, 255, 255))
+    contour_layer = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+    contour_layer.paste(white_fill, (0, 0), dilated_mask)
+
+    # Kontur ustiga asl ob'yektni tushirish
+    stk = Image.alpha_composite(contour_layer, cutout_rgba)
+
+    # 512x512 kvadrat kanvasga markazlashtirib joylash
+    canvas = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+    canvas.paste(stk, ((512 - cw) // 2, (512 - ch) // 2))
+
+    return canvas
+
+def make_auto_cutout_with_contour(img_bytes, contour_width=12):
+    """
+    Rasmdan ob'yektni avtomatik qirqib oladi (fondan ajratadi) va
+    oq kontur (sticker outline) qo'shib 512x512 stiker yasaydi.
+    """
+    img_pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    cv_img = np.array(img_pil)
+    h, w = cv_img.shape[:2]
+
+    # GrabCut yordamida markaziy ob'yektni ajratish
+    margin_x = max(8, int(w * 0.05))
+    margin_y = max(8, int(h * 0.05))
+    rect = (margin_x, margin_y, w - 2 * margin_x, h - 2 * margin_y)
+
+    mask = np.zeros((h, w), np.uint8)
+    bgdModel = np.zeros((1, 65), np.float64)
+    fgdModel = np.zeros((1, 65), np.float64)
+
+    try:
+        cv2.grabCut(cv_img, mask, rect, bgdModel, fgdModel, 3, cv2.GC_INIT_WITH_RECT)
+        mask2 = np.where((mask == 2) | (mask == 0), 0, 255).astype("uint8")
+        mask_pil = Image.fromarray(mask2).filter(ImageFilter.GaussianBlur(1))
+    except Exception as e:
+        print("[GRABCUT FALLBACK]:", e)
+        mask_pil = Image.new("L", (w, h), 255)
+
+    cutout = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    cutout.paste(img_pil.convert("RGBA"), (0, 0), mask_pil)
+
+    canvas = add_white_contour_to_cutout(cutout, contour_width=contour_width)
+
+    webp_io = io.BytesIO()
+    canvas.save(webp_io, format="WEBP", quality=95)
+    png_io = io.BytesIO()
+    canvas.save(png_io, format="PNG")
+    return webp_io.getvalue(), png_io.getvalue()
+
+def convert_to_sticker(image_bytes, style="cutout"):
+    """
     style:
-      - 'circle': Dumaloq qirqilgan, oq hoshiyali professional avatar stiker.
-      - 'rounded': Yumaloq burchakli to'rtburchak stiker.
-      - 'standard': Rasm proporsiyasini to'liq saqlagan holda 512x512 ga sig'dirish.
-    Qaytaradi: (webp_bytes, png_bytes)
+      - 'cutout': Obyektni qirqib olish + Oq stiker konturi (Telegram uslubi).
+      - 'circle': Dumaloq qirqilgan, oq hoshiyali avatar stiker.
+      - 'standard': Asl nisbatni saqlagan holda toza stiker.
+      - 'rounded': Yumaloq burchakli stiker.
     """
+    if style == "cutout":
+        return make_auto_cutout_with_contour(image_bytes, contour_width=12)
+
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
     size = 512
 
     if style == "circle":
-        # Markazdan kvadrat qirqish
         min_side = min(img.width, img.height)
         left = (img.width - min_side) // 2
         top = (img.height - min_side) // 2
         cropped = img.crop((left, top, left + min_side, top + min_side))
-        
-        # 480x480 ga kichraytirish (atrofiga oq hoshiya sig'ishi uchun)
-        inner_size = 480
+
+        inner_size = 470
         cropped = cropped.resize((inner_size, inner_size), Image.Resampling.LANCZOS)
-        
-        # Dumaloq maska
+
         mask = Image.new("L", (inner_size, inner_size), 0)
         draw_mask = ImageDraw.Draw(mask)
         draw_mask.ellipse((0, 0, inner_size, inner_size), fill=255)
-        
-        # 512x512 kanvas yaratish
+
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         cdraw = ImageDraw.Draw(canvas)
-        
-        # Qalin oq hoshiya (border)
+        # Oq stiker hoshiyasi
         cdraw.ellipse((6, 6, size - 6, size - 6), fill=(255, 255, 255, 255))
-        # Nozik soya / kontur effekti
         cdraw.ellipse((8, 8, size - 8, size - 8), outline=(220, 220, 220, 255), width=2)
-        
-        # Rasmni markazga joylash
+
         offset = ((size - inner_size) // 2, (size - inner_size) // 2)
         canvas.paste(cropped, offset, mask)
         final_img = canvas
 
     elif style == "rounded":
-        # Proporsiya bo'yicha sig'dirish (chekka hoshiya uchun 480 gacha)
         img.thumbnail((470, 470), Image.Resampling.LANCZOS)
         w, h = img.size
         radius = 32
-        
-        # Dumaloq burchak maskasi
+
         mask = Image.new("L", (w, h), 0)
         mdraw = ImageDraw.Draw(mask)
         mdraw.rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
-        
-        # Oq hoshiyali kanvas
+
         bw, bh = w + 20, h + 20
         bcanvas = Image.new("RGBA", (bw, bh), (0, 0, 0, 0))
         bdraw = ImageDraw.Draw(bcanvas)
         bdraw.rounded_rectangle((0, 0, bw, bh), radius=radius + 6, fill=(255, 255, 255, 255))
         bcanvas.paste(img, (10, 10), mask)
-        
-        # 512x512 markaziga joylash
+
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         canvas.paste(bcanvas, ((size - bw) // 2, ((size - bh) // 2)))
         final_img = canvas
 
     else:
-        # Standard fit: Asl nisbatni saqlab 512x512 gacha kattalashtirish/kichraytirish
+        # Standard fit
         img.thumbnail((size, size), Image.Resampling.LANCZOS)
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
         canvas.paste(img, ((size - img.width) // 2, ((size - img.height) // 2)))
         final_img = canvas
 
-    # WEBP va PNG baytlarini chiqarish
     webp_io = io.BytesIO()
     final_img.save(webp_io, format="WEBP", quality=95)
-    webp_bytes = webp_io.getvalue()
-
     png_io = io.BytesIO()
     final_img.save(png_io, format="PNG")
-    png_bytes = png_io.getvalue()
+    return webp_io.getvalue(), png_io.getvalue()
 
-    return webp_bytes, png_bytes
-
-# ─────────────────────────────────────────────────────────────
-# 2. RASMDAN ANIMATSION GIF STIKER YASASH
-# ─────────────────────────────────────────────────────────────
 def convert_to_gif(image_bytes, anim_type="pulse"):
     """
     Oddiy rasmdan animatsion GIF stiker yasaydi.
-    anim_type:
-      - 'pulse': Yaqinlashib-uzoqlovchi pulsatsiya (kattalashib-kichrayish)
-      - 'shake': Kulgili silkinish / tebranish effekti
-      - 'spin': 360 gradus yumshoq aylanish
-      - 'heartbeat': Yurak urishi effekti
     """
     base = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
     size = 512
-    # Animatsiya hoshiyadan chiqib ketmasligi uchun 420x420 ga sig'diramiz
     base.thumbnail((420, 420), Image.Resampling.LANCZOS)
 
     frames = []
-
     if anim_type == "pulse":
         steps = [1.0, 1.03, 1.07, 1.12, 1.18, 1.22, 1.18, 1.12, 1.07, 1.03]
         for s in steps:
@@ -179,7 +234,6 @@ def convert_to_gif(image_bytes, anim_type="pulse"):
             frames.append(canvas)
 
     elif anim_type == "heartbeat":
-        # Tez 2 marta urish va tinch turish
         steps = [1.0, 1.15, 1.05, 1.22, 1.0, 1.0, 1.0, 1.0]
         for s in steps:
             nw, nh = int(base.width * s), int(base.height * s)
@@ -201,13 +255,10 @@ def convert_to_gif(image_bytes, anim_type="pulse"):
     return out.getvalue()
 
 # ─────────────────────────────────────────────────────────────
-# 3. TELEGRAM BOT API ORQALI YUBORISH VA YUKLAB OLISH
+# 2. TELEGRAM BOT API
 # ─────────────────────────────────────────────────────────────
+
 def api_send_sticker(chat_id, sticker_input, reply_markup=None, bot_token=None):
-    """
-    Telegramga to'g'ridan-to'g'ri .WEBP stiker yuborish.
-    sticker_input: fayl baytlari (bytes) yoki mavjud file_id (str)
-    """
     token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
     url = f"https://api.telegram.org/bot{token}/sendSticker"
     try:
@@ -231,9 +282,6 @@ def api_send_sticker(chat_id, sticker_input, reply_markup=None, bot_token=None):
         return False, None, str(e)
 
 def api_send_animation(chat_id, animation_bytes_or_id, caption="", reply_markup=None, bot_token=None):
-    """
-    Telegramga animatsion GIF stiker yuborish.
-    """
     token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
     url = f"https://api.telegram.org/bot{token}/sendAnimation"
     try:
@@ -257,9 +305,6 @@ def api_send_animation(chat_id, animation_bytes_or_id, caption="", reply_markup=
         return False, None, str(e)
 
 def api_send_voice(chat_id, voice_file_id_or_bytes, caption="", reply_markup=None, bot_token=None):
-    """
-    Telegramga ovozli xabar (Voice) yuborish.
-    """
     token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
     url = f"https://api.telegram.org/bot{token}/sendVoice"
     try:
@@ -283,9 +328,6 @@ def api_send_voice(chat_id, voice_file_id_or_bytes, caption="", reply_markup=Non
         return False, None, str(e)
 
 def api_download_file(file_id, bot_token=None):
-    """
-    Telegram serveridan faylni file_id orqali yuklab olish.
-    """
     token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
     try:
         info_url = f"https://api.telegram.org/bot{token}/getFile?file_id={file_id}"
@@ -293,7 +335,7 @@ def api_download_file(file_id, bot_token=None):
         res = r.json()
         if not res.get("ok"):
             return None, res.get("description", "Fayl topilmadi")
-        
+
         file_path = res["result"]["file_path"]
         down_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
         down_r = requests.get(down_url, timeout=40)
@@ -303,19 +345,11 @@ def api_download_file(file_id, bot_token=None):
     except Exception as e:
         return None, str(e)
 
-# ─────────────────────────────────────────────────────────────
-# 4. TELEGRAM STICKER PACK (TO'PLAM) YARATISH VA BOSHQARISH
-# ─────────────────────────────────────────────────────────────
 def get_or_create_pack_name(user_id, bot_username=None):
-    """
-    Stiker to'plami nomini generatsiya qilish.
-    Telegram qoidasiga ko'ra: <name>_by_<bot_username>
-    """
     clean_bot = (bot_username or "Orifxon_assistantbot").replace("@", "")
     data = load_sticker_data()
     if data.get("pack_name"):
         return data["pack_name"]
-    # Unikal nom: u{user_id}_stickers_by_{bot}
     name = f"u{user_id}_stickers_by_{clean_bot}"
     data["pack_name"] = name
     data["pack_url"] = f"https://t.me/addstickers/{name}"
@@ -323,16 +357,11 @@ def get_or_create_pack_name(user_id, bot_username=None):
     return name
 
 def api_add_sticker_to_pack(user_id, png_or_webp_bytes, emoji="✨", bot_token=None, bot_username="Orifxon_assistantbot"):
-    """
-    Stikerni Telegram stiker to'plamiga qo'shadi.
-    Agar to'plam hali yaratilmagan bo'lsa, avval createNewStickerSet chaqiradi.
-    """
     token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN")
     pack_name = get_or_create_pack_name(user_id, bot_username)
     data = load_sticker_data()
     pack_title = data.get("pack_title", "Orifxon Stikerlari")
 
-    # 1. To'plam mavjudligini tekshirish
     check_url = f"https://api.telegram.org/bot{token}/getStickerSet"
     pack_exists = False
     try:
@@ -342,11 +371,8 @@ def api_add_sticker_to_pack(user_id, png_or_webp_bytes, emoji="✨", bot_token=N
     except Exception:
         pass
 
-    # 2. Yangi yaratish yoki qo'shish
     if not pack_exists:
-        # createNewStickerSet
         url = f"https://api.telegram.org/bot{token}/createNewStickerSet"
-        # Modern Bot API: stickers parameter
         stickers_payload = json.dumps([{
             "sticker": "attach://stk_file",
             "emoji_list": [emoji],
@@ -367,7 +393,6 @@ def api_add_sticker_to_pack(user_id, png_or_webp_bytes, emoji="✨", bot_token=N
                 save_sticker_data(data)
                 return True, data["pack_url"], None
 
-            # Fallback legacy: png_sticker
             legacy_data = {
                 "user_id": user_id,
                 "name": pack_name,
@@ -384,11 +409,8 @@ def api_add_sticker_to_pack(user_id, png_or_webp_bytes, emoji="✨", bot_token=N
             return False, None, r.get("description") or lr.get("description", "Yaratib bo'lmadi")
         except Exception as e:
             return False, None, str(e)
-
     else:
-        # addStickerToSet
         url = f"https://api.telegram.org/bot{token}/addStickerToSet"
-        # Modern Bot API: sticker parameter
         sticker_payload = json.dumps({
             "sticker": "attach://stk_file",
             "emoji_list": [emoji],
@@ -406,7 +428,6 @@ def api_add_sticker_to_pack(user_id, png_or_webp_bytes, emoji="✨", bot_token=N
             if r.get("ok"):
                 return True, data.get("pack_url", f"https://t.me/addstickers/{pack_name}"), None
 
-            # Fallback legacy: png_sticker
             legacy_data = {
                 "user_id": user_id,
                 "name": pack_name,
@@ -422,12 +443,10 @@ def api_add_sticker_to_pack(user_id, png_or_webp_bytes, emoji="✨", bot_token=N
             return False, None, str(e)
 
 # ─────────────────────────────────────────────────────────────
-# 5. OVOZLI STIKERLAR (SOUND STICKERS) BOSHQARUVI
+# 3. OVOZLI STIKERLAR (SOUND STICKERS)
 # ─────────────────────────────────────────────────────────────
+
 def save_sound_sticker_pair(sticker_file_id, voice_file_id, title="Ovozli stiker", emoji="🎙️", duration=0):
-    """
-    Stiker va ovozli xabarni yagona juftlik qilib saqlaydi.
-    """
     data = load_sticker_data()
     pair_id = f"snd_{int(time.time())}"
     pair = {
@@ -449,29 +468,26 @@ def delete_sound_sticker(pair_id):
     save_sticker_data(data)
 
 def send_sound_sticker_pair(chat_id, pair_id, bot_token=None):
-    """
-    Ovozli stikerni jo'natadi: oldin stiker, keyin unga biriktirilgan ovozli xabar ketma-ket.
-    """
     data = load_sticker_data()
     pair = next((s for s in data["sound_stickers"] if s["id"] == pair_id), None)
     if not pair:
         return False, "Ovozli stiker topilmadi."
 
-    # 1. Stikerni yuborish
-    ok_stk, _, err1 = api_send_sticker(chat_id, pair["sticker_file_id"], bot_token=bot_token)
-    # 2. Ovozni yuborish
+    ok_stk, _, _ = api_send_sticker(chat_id, pair["sticker_file_id"], bot_token=bot_token)
     caption = f"{pair['emoji']} <b>{pair['title']}</b>"
-    ok_vce, _, err2 = api_send_voice(chat_id, pair["voice_file_id"], caption=caption, bot_token=bot_token)
+    ok_vce, _, _ = api_send_voice(chat_id, pair["voice_file_id"], caption=caption, bot_token=bot_token)
     return (ok_stk or ok_vce), None
 
 # ─────────────────────────────────────────────────────────────
-# 6. KLAVIATURALAR (UI KEYBOARDS)
+# 4. KLAVIATURALAR (UI KEYBOARDS)
 # ─────────────────────────────────────────────────────────────
+
+AVAILABLE_EMOJIS = ["🎩", "❤️", "👍", "👎", "🔥", "🥰", "👏", "😂"]
+
 def get_sticker_main_menu_keyboard():
     data = load_sticker_data()
     stk_count = len(data.get("stickers", []))
     snd_count = len(data.get("sound_stickers", []))
-    pack_name = data.get("pack_name", "")
 
     return {
         "inline_keyboard": [
@@ -492,40 +508,58 @@ def get_sticker_main_menu_keyboard():
         ]
     }
 
-def get_sticker_style_keyboard(temp_key):
+def get_sticker_style_keyboard():
     return {
         "inline_keyboard": [
-            [{"text": "⚪ Dumaloq stiker (Oq hoshiyali)", "callback_data": f"stk_apply_circle_{temp_key}"}],
-            [{"text": "📐 Asl ko‘rinish (To‘liq rasm)", "callback_data": f"stk_apply_standard_{temp_key}"}],
-            [{"text": "🔲 Yumaloq burchakli stiker", "callback_data": f"stk_apply_rounded_{temp_key}"}],
+            [{"text": "✨ Obyektni qirqish + Kontur (Telegram stili)", "callback_data": "stk_apply_cutout"}],
+            [{"text": "⚪ Dumaloq stiker (Oq hoshiyali)", "callback_data": "stk_apply_circle"}],
+            [{"text": "📐 Asl ko‘rinish (To‘liq rasm)", "callback_data": "stk_apply_standard"}],
+            [{"text": "🔲 Yumaloq burchakli", "callback_data": "stk_apply_rounded"}],
+            [{"text": "🎞️ GIF stiker qilish", "callback_data": "stk_apply_gif_pulse"}],
             [{"text": "❌ Bekor qilish", "callback_data": "stk_cancel"}]
         ]
     }
 
-def get_gif_style_keyboard(temp_key):
+def get_gif_style_keyboard():
     return {
         "inline_keyboard": [
-            [{"text": "💓 Pulsatsiya (Kattalashib-kichrayish)", "callback_data": f"stk_gif_pulse_{temp_key}"}],
-            [{"text": "⚡ Silkinish (Wiggle / Kulgili)", "callback_data": f"stk_gif_shake_{temp_key}"}],
-            [{"text": "🔄 Aylanish (360° Spin)", "callback_data": f"stk_gif_spin_{temp_key}"}],
-            [{"text": "❤️ Yurak urishi (Heartbeat)", "callback_data": f"stk_gif_heart_{temp_key}"}],
+            [{"text": "💓 Pulsatsiya (Kattalashib-kichrayish)", "callback_data": "stk_gif_pulse"}],
+            [{"text": "⚡ Silkinish (Wiggle / Kulgili)", "callback_data": "stk_gif_shake"}],
+            [{"text": "🔄 Aylanish (360° Spin)", "callback_data": "stk_gif_spin"}],
+            [{"text": "❤️ Yurak urishi (Heartbeat)", "callback_data": "stk_gif_heart"}],
             [{"text": "❌ Bekor qilish", "callback_data": "stk_cancel"}]
         ]
     }
 
-def get_sticker_after_action_keyboard(stk_index):
+def get_emoji_selector_keyboard(chat_id):
+    """
+    Foydalanuvchining 3-rasmidagidek:
+    Stikeringizga mos keladigan emojilarni tanlang:
+    🎩 ❤️ 👍 👎 🔥 🥰 👏 😂
+    [➕ Stikerlar to'plamiga qo'shish]
+    """
+    data = load_sticker_data()
+    selected = data.get("selected_emojis", {}).get(str(chat_id), "✨")
+
+    emoji_row = []
+    for em in AVAILABLE_EMOJIS:
+        label = f"✅{em}" if em == selected else em
+        emoji_row.append({"text": label, "callback_data": f"stk_pick_emoji_{em}"})
+
+    # 4 ta dan 2 qatorga bo'lish
+    r1 = emoji_row[:4]
+    r2 = emoji_row[4:]
+
     return {
         "inline_keyboard": [
+            r1,
+            r2,
+            [{"text": f"➕ Stikerlar to‘plamiga qo‘shish ({selected})", "callback_data": "stk_do_add_to_pack"}],
             [
-                {"text": "➕ To‘plamga qo‘shish (Pack)", "callback_data": f"stk_pack_add_{stk_index}"},
-                {"text": "🎙️ Ovoz biriktirish", "callback_data": f"stk_attach_voice_{stk_index}"}
+                {"text": "🎙️ Ovoz biriktirish", "callback_data": "stk_attach_voice"},
+                {"text": "🎞️ GIF qilish", "callback_data": "stk_make_gif"}
             ],
-            [
-                {"text": "🎞️ GIF stiker qilish", "callback_data": f"stk_make_gif_{stk_index}"}
-            ],
-            [
-                {"text": "⬅️ Stiker menyusi", "callback_data": "stk_menu"}
-            ]
+            [{"text": "⬅️ Stiker menyusi", "callback_data": "stk_menu"}]
         ]
     }
 
@@ -534,7 +568,6 @@ def get_sound_stickers_keyboard():
     sound_list = data.get("sound_stickers", [])
     buttons = []
 
-    # Har bir ovozli stiker uchun tugma
     for s in sound_list[:8]:
         title = s.get("title") or "Ovozli stiker"
         emoji = s.get("emoji") or "🎙️"
@@ -545,13 +578,11 @@ def get_sound_stickers_keyboard():
 
     buttons.append([{"text": "➕ Yangi ovozli stiker yaratish", "callback_data": "stk_create_static"}])
     buttons.append([{"text": "⬅️ Stiker menyusi", "callback_data": "stk_menu"}])
-
     return {"inline_keyboard": buttons}
 
 # ─────────────────────────────────────────────────────────────
-# 7. ASOSIY MENYU VA CALLBACK HANDLERLAR
+# 5. ASOSIY MENYU VA CALLBACK HANDLERLAR
 # ─────────────────────────────────────────────────────────────
-TEMP_STICKER_STORAGE = {}
 
 def send_sticker_main_menu(chat_id, send_message_fn):
     data = load_sticker_data()
@@ -564,8 +595,8 @@ def send_sticker_main_menu(chat_id, send_message_fn):
 
     text = (
         "🎨 <b>Stiker Ustaxonasi (Sticker Studio)</b>\n\n"
-        "O‘zingizning rasmlaringizdan shaxsiy Telegram stiker to‘plamini yarating, "
-        "harakatlanuvchi GIF stikerlar yasang va stikerlarga ovozli xabar (Sound sticker) biriktiring!\n\n"
+        "Rasmlaringizdan professional Telegram stikerlari, fonni qirqib olish va oq kontur berish, "
+        "animatsion GIF stikerlar va ovozli xabarlar (Sound stickers) yarating!\n\n"
         f"📦 <b>To‘plam:</b> {pack_info}\n"
         f"🖼️ <b>Stikerlar:</b> {stk_count} ta\n"
         f"🎙️ <b>Ovozli stikerlar:</b> {snd_count} ta\n\n"
@@ -584,8 +615,8 @@ async def handle_sticker_callback(chat_id, data, callback_query, send_message_fn
         send_message_fn(
             chat_id,
             "📸 <b>Stiker uchun rasm yuboring:</b>\n\n"
-            "Menga stiker qilmoqchi bo‘lgan rasmingizni yuboring (Oddiy rasm yoki Fayl ko‘rinishida).\n"
-            "Bot uni avtomatik 512x512 stiker ko‘rinishiga keltiradi.",
+            "Menga stiker qilmoqchi bo‘lgan rasmingizni yuboring.\n"
+            "Bot ob'yektni qirqib olish (fonni tozalash), oq kontur qo‘shish yoki dumaloq stiker qilish imkoniyatini taqdim etadi.",
             kb,
             parse_mode="HTML"
         )
@@ -628,9 +659,9 @@ async def handle_sticker_callback(chat_id, data, callback_query, send_message_fn
             text = (
                 "📦 <b>Sizning Shaxsiy Stiker To‘plamingiz</b>\n\n"
                 f"Sarlavha: <b>{pack_title}</b>\n\n"
-                "Hali to‘plamga hech qanday stiker qo‘shilmagan.\n"
-                "Birinchi rasmingizni stiker qilib, <b>➕ To‘plamga qo‘shish</b> tugmasini bossangiz, "
-                "Telegramda sizning shaxsiy sticker pack'ingiz avtomatik yaratiladi va maxsus havola beriladi!"
+                "Hali to‘plamga stiker qo‘shilmagan.\n"
+                "Birinchi rasmingizni stiker qilib, <b>➕ Stikerlar to‘plamiga qo‘shish</b> tugmasini bossangiz, "
+                "Telegramda shaxsiy to‘plam havolasi hosil bo‘ladi!"
             )
             kb = {
                 "inline_keyboard": [
@@ -649,10 +680,9 @@ async def handle_sticker_callback(chat_id, data, callback_query, send_message_fn
                 "🎙️ <b>Ovozli Stikerlar (Sound Stickers)</b>\n\n"
                 "Sizda hali ovozli stikerlar mavjud emas.\n\n"
                 "💡 <b>Bu qanday ishlaydi?</b>\n"
-                "1. Avval rasmdan stiker yarating.\n"
-                "2. <b>🎙️ Ovoz biriktirish</b> tugmasini bosing va ovozli xabar (Voice) yuboring.\n"
-                "3. Bot stiker va ovozni juftlik qilib saqlaydi.\n"
-                "4. Shunda bir tugmani bosish orqali ham stiker, ham ovozli xabar ketma-ket yuboriladi!"
+                "1. Rasmdan stiker yarating.\n"
+                "2. <b>🎙️ Ovoz biriktirish</b> tugmasini bosib, ovozli xabar (Voice) jo‘nating.\n"
+                "3. Bot stiker va ovozni juftlik qilib saqlaydi va bir bosishda ikkalasini birga jo‘natadi!"
             )
         else:
             text = (
@@ -678,36 +708,42 @@ async def handle_sticker_callback(chat_id, data, callback_query, send_message_fn
         send_message_fn(chat_id, f"🎙️ <b>Ovozli stikerlar ro‘yxati ({len(sound_list)} ta):</b>", get_sound_stickers_keyboard(), parse_mode="HTML")
         return
 
+    # ─────────────────────────────────────────────────────────
+    # STIKER YASASH AMALLARI (Cutout, Circle, Standard, Rounded)
+    # ─────────────────────────────────────────────────────────
     if data.startswith("stk_apply_"):
-        # Masalan: stk_apply_circle_123456
-        parts = data.split("_")
-        style = parts[2]
-        temp_key = parts[3]
-        photo_bytes = TEMP_STICKER_STORAGE.get(temp_key)
+        style = data.replace("stk_apply_", "")
+        temp_path = get_temp_photo_path(chat_id)
 
-        if not photo_bytes:
-            send_message_fn(chat_id, "⚠️ Rasm muddati tugagan. Iltimos, rasmni qaytadan yuboring.", get_sticker_main_menu_keyboard())
+        if not os.path.exists(temp_path):
+            send_message_fn(chat_id, "⚠️ Rasm topilmadi. Iltimos, rasmni qaytadan yuboring.", get_sticker_main_menu_keyboard())
             return
 
-        send_message_fn(chat_id, "⏳ Stiker tayyorlanmoqda...")
-        webp_bytes, png_bytes = convert_to_sticker(photo_bytes, style=style)
+        with open(temp_path, "rb") as f:
+            photo_bytes = f.read()
 
-        # Stiker sifatida jo'natish
-        ok, file_id, res = api_send_sticker(chat_id, webp_bytes, bot_token=bot_token)
+        send_message_fn(chat_id, "⏳ <b>Stiker tahrirlanmoqda...</b>\n<i>(Obyekt ajratilmoqda va kontur qo‘shilmoqda)</i>", parse_mode="HTML")
+
+        try:
+            webp_bytes, png_bytes = convert_to_sticker(photo_bytes, style=style)
+        except Exception as e:
+            send_message_fn(chat_id, f"❌ Stiker yasashda xatolik yuz berdi: {e}")
+            return
+
+        # Natijani diskda joriy stiker sifatida saqlash
+        current_path = get_current_sticker_path(chat_id)
+        with open(current_path, "wb") as f:
+            f.write(png_bytes)
+
+        # Telegramga stiker sifatida yuborish
+        ok, file_id, _ = api_send_sticker(chat_id, webp_bytes, bot_token=bot_token)
 
         stk_data = load_sticker_data()
         stk_id = f"stk_{int(time.time())}"
-        
-        # Faylni diskda saqlash
-        local_filename = f"{stk_id}.png"
-        local_path = os.path.join(STICKERS_DIR, local_filename)
-        with open(local_path, "wb") as f:
-            f.write(png_bytes)
-
         stk_entry = {
             "id": stk_id,
             "file_id": file_id or "",
-            "local_path": local_path,
+            "local_path": current_path,
             "format": "static",
             "style": style,
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
@@ -715,77 +751,50 @@ async def handle_sticker_callback(chat_id, data, callback_query, send_message_fn
         stk_data["stickers"].append(stk_entry)
         save_sticker_data(stk_data)
 
-        # Temp Storage'da saqlab turish
-        TEMP_STICKER_STORAGE[stk_id] = png_bytes
-
+        # Emojilar va to'plamga qo'shish menyusini ko'rsatish
         caption_text = (
-            "✅ <b>Stiker tayyor!</b>\n\n"
-            "Endi ushbu stiker bilan nima qilmoqchisiz?\n"
-            "• <b>➕ To‘plamga qo‘shish:</b> Telegram shaxsiy sticker pack'ingizga kiritadi\n"
-            "• <b>🎙️ Ovoz biriktirish:</b> Ovozli xabar qo‘shib, Sound Sticker qiladi\n"
-            "• <b>🎞️ GIF qilish:</b> Rasmni harakatlantirib, animatsion GIF stiker yasaydi"
+            "✅ <b>Stikeringiz tayyor!</b>\n\n"
+            "Stikeringizga mos keladigan emojini tanlang va <b>➕ Stikerlar to‘plamiga qo‘shish</b> tugmasini bosing:"
         )
-        send_message_fn(chat_id, caption_text, get_sticker_after_action_keyboard(stk_id), parse_mode="HTML")
+        send_message_fn(chat_id, caption_text, get_emoji_selector_keyboard(chat_id), parse_mode="HTML")
         return
 
-    if data.startswith("stk_gif_"):
-        # Masalan: stk_gif_pulse_123456
-        parts = data.split("_")
-        anim_type = parts[2]
-        temp_key = parts[3]
-        photo_bytes = TEMP_STICKER_STORAGE.get(temp_key)
-
-        if not photo_bytes:
-            send_message_fn(chat_id, "⚠️ Rasm muddati tugagan. Iltimos, rasmni qaytadan yuboring.", get_sticker_main_menu_keyboard())
-            return
-
-        send_message_fn(chat_id, "⏳ Animatsion GIF stiker tayyorlanmoqda...")
-        gif_bytes = convert_to_gif(photo_bytes, anim_type=anim_type)
-
-        gif_id = f"gif_{int(time.time())}"
-        local_filename = f"{gif_id}.gif"
-        local_path = os.path.join(STICKERS_DIR, local_filename)
-        with open(local_path, "wb") as f:
-            f.write(gif_bytes)
-
-        caption = "🎞️ <b>Animatsion GIF stiker tayyor!</b>\n\nUshbu GIF avtomatik aylanadi va uni saqlab olishingiz mumkin."
-        kb = {
-            "inline_keyboard": [
-                [{"text": "➕ Yana stiker yaratish", "callback_data": "stk_create_static"}],
-                [{"text": "⬅️ Stiker menyusi", "callback_data": "stk_menu"}]
-            ]
-        }
-        api_send_animation(chat_id, gif_bytes, caption=caption, reply_markup=kb, bot_token=bot_token)
-        return
-
-    if data.startswith("stk_pack_add_"):
-        stk_id = data.replace("stk_pack_add_", "")
+    # EMOJI TANLASH
+    if data.startswith("stk_pick_emoji_"):
+        emoji = data.replace("stk_pick_emoji_", "")
         stk_data = load_sticker_data()
-        stk_entry = next((s for s in stk_data.get("stickers", []) if s["id"] == stk_id), None)
-        
-        png_bytes = TEMP_STICKER_STORAGE.get(stk_id)
-        if not png_bytes and stk_entry and os.path.exists(stk_entry.get("local_path", "")):
-            with open(stk_entry["local_path"], "rb") as f:
-                png_bytes = f.read()
+        stk_data["selected_emojis"][str(chat_id)] = emoji
+        save_sticker_data(stk_data)
+        send_message_fn(chat_id, f"Emoji tanlandi: {emoji}", get_emoji_selector_keyboard(chat_id))
+        return
 
-        if not png_bytes:
-            send_message_fn(chat_id, "⚠️ Stiker fayli topilmadi. Qaytadan stiker yarating.", get_sticker_main_menu_keyboard())
+    # TO'PLAMGA QO'SHISH
+    if data == "stk_do_add_to_pack":
+        current_path = get_current_sticker_path(chat_id)
+        if not os.path.exists(current_path):
+            send_message_fn(chat_id, "⚠️ Avval rasm yuborib stiker yasang.", get_sticker_main_menu_keyboard())
             return
 
-        send_message_fn(chat_id, "⏳ Telegram stiker to‘plamiga qo‘shilmoqda...")
+        with open(current_path, "rb") as f:
+            png_bytes = f.read()
+
+        stk_data = load_sticker_data()
+        selected_emoji = stk_data.get("selected_emojis", {}).get(str(chat_id), "✨")
+
+        send_message_fn(chat_id, "⏳ <b>Telegram stiker to‘plamiga qo‘shilmoqda...</b>", parse_mode="HTML")
         ok, pack_url, err = api_add_sticker_to_pack(
             user_id=chat_id,
             png_or_webp_bytes=png_bytes,
-            emoji="✨",
+            emoji=selected_emoji,
             bot_token=bot_token,
             bot_username=bot_username
         )
 
         if ok:
             text = (
-                "🎉 <b>Stiker to‘plamingizga muvaffaqiyatli qo‘shildi!</b>\n\n"
-                f"🔗 <b>Sizning to‘plamingiz havolasi:</b>\n<code>{pack_url}</code>\n\n"
-                "Havolani bosib, stikerlaringizni Telegram klaviaturangizga qo‘shib oling!"
+                f"🎉 <b>Stiker {selected_emoji} to‘plamingizga muvaffaqiyatli qo‘shildi!</b>\n\n"
+                f"🔗 <b>To‘plam havolasi:</b>\n<code>{pack_url}</code>\n\n"
+                "Ushbu havolani bosib, stikerlaringizni to‘g‘ridan-to‘g‘ri Telegram klaviaturangizga qo‘shib oling!"
             )
             kb = {
                 "inline_keyboard": [
@@ -799,26 +808,58 @@ async def handle_sticker_callback(chat_id, data, callback_query, send_message_fn
             text = (
                 f"ℹ️ <b>To‘plam holati:</b>\n\n"
                 f"Telegram javobi: <code>{err}</code>\n\n"
-                "💡 <i>Eslatma: Stikeringiz botda va chatda tayyor saqlanib qoldi. Uni do‘stlaringizga yuborishingiz yoki ovoz biriktirishingiz mumkin!</i>"
+                "💡 <i>Eslatma: Stikeringiz botda tayyor saqlanib qoldi. Uni do‘stlaringizga yuborishingiz yoki ovoz biriktirishingiz mumkin!</i>"
             )
             kb = {
                 "inline_keyboard": [
-                    [{"text": "🎙️ Ovoz biriktirish", "callback_data": f"stk_attach_voice_{stk_id}"}],
+                    [{"text": "🎙️ Ovoz biriktirish", "callback_data": "stk_attach_voice"}],
                     [{"text": "⬅️ Stiker menyusi", "callback_data": "stk_menu"}]
                 ]
             }
             send_message_fn(chat_id, text, kb, parse_mode="HTML")
         return
 
-    if data.startswith("stk_attach_voice_"):
-        stk_id = data.replace("stk_attach_voice_", "")
+    # GIF STIKER
+    if data.startswith("stk_gif_"):
+        anim_type = data.replace("stk_gif_", "")
+        temp_path = get_temp_photo_path(chat_id)
+
+        if not os.path.exists(temp_path):
+            send_message_fn(chat_id, "⚠️ Rasm topilmadi. Qaytadan rasm yuboring.", get_sticker_main_menu_keyboard())
+            return
+
+        with open(temp_path, "rb") as f:
+            photo_bytes = f.read()
+
+        send_message_fn(chat_id, "⏳ <b>Animatsion GIF stiker tayyorlanmoqda...</b>", parse_mode="HTML")
+        try:
+            gif_bytes = convert_to_gif(photo_bytes, anim_type=anim_type)
+        except Exception as e:
+            send_message_fn(chat_id, f"❌ GIF yasashda xatolik: {e}")
+            return
+
+        caption = "🎞️ <b>Animatsion GIF stiker tayyor!</b>\n\nUshbu GIF Telegramda avtomatik o‘ynaydi va aylanadi."
+        kb = {
+            "inline_keyboard": [
+                [{"text": "➕ Yana stiker yaratish", "callback_data": "stk_create_static"}],
+                [{"text": "⬅️ Stiker menyusi", "callback_data": "stk_menu"}]
+            ]
+        }
+        api_send_animation(chat_id, gif_bytes, caption=caption, reply_markup=kb, bot_token=bot_token)
+        return
+
+    if data == "stk_make_gif":
+        send_message_fn(chat_id, "🎞️ <b>GIF animatsiya turini tanlang:</b>", get_gif_style_keyboard(), parse_mode="HTML")
+        return
+
+    if data == "stk_attach_voice":
         stk_data = load_sticker_data()
-        stk_entry = next((s for s in stk_data.get("stickers", []) if s["id"] == stk_id), None)
-        
-        file_id = stk_entry["file_id"] if stk_entry else stk_id
+        stickers = stk_data.get("stickers", [])
+        last_stk = stickers[-1] if stickers else {}
+        file_id = last_stk.get("file_id", "")
+
         pending_actions[chat_id] = {
             "type": "stk_awaiting_voice",
-            "stk_id": stk_id,
             "stk_file_id": file_id
         }
         kb = {"inline_keyboard": [[{"text": "❌ Bekor qilish", "callback_data": "stk_cancel"}]]}
@@ -832,29 +873,17 @@ async def handle_sticker_callback(chat_id, data, callback_query, send_message_fn
         )
         return
 
-    if data.startswith("stk_make_gif_"):
-        stk_id = data.replace("stk_make_gif_", "")
-        stk_data = load_sticker_data()
-        stk_entry = next((s for s in stk_data.get("stickers", []) if s["id"] == stk_id), None)
-        if stk_entry and os.path.exists(stk_entry.get("local_path", "")):
-            with open(stk_entry["local_path"], "rb") as f:
-                TEMP_STICKER_STORAGE[stk_id] = f.read()
-            send_message_fn(chat_id, "🎞️ <b>GIF animatsiya turini tanlang:</b>", get_gif_style_keyboard(stk_id), parse_mode="HTML")
-        else:
-            send_message_fn(chat_id, "⚠️ Rasm topilmadi. Qaytadan rasm yuboring.", get_sticker_main_menu_keyboard())
-        return
-
     if data == "stk_help":
         help_text = (
             "📖 <b>Stiker Ustaxonasi Qo‘llanmasi</b>\n\n"
-            "1️⃣ <b>Statik stikerlar:</b>\n"
-            "O‘z rasmingizni yuborasiz -> Bot uni oq hoshiyali dumaloq yoki to‘liq formatdagi 512x512 stikerga aylantirib beradi.\n\n"
-            "2️⃣ <b>GIF stikerlar:</b>\n"
-            "Rasmingizga pulsatsiya, silkinish yoki aylanish effekti berilib, Telegramda aylanib turuvchi GIF stiker yasaladi.\n\n"
+            "1️⃣ <b>Obyektni qirqish va oq kontur (Telegram stili):</b>\n"
+            "Rasm yuborasiz -> <b>✨ Obyektni qirqish + Kontur</b> tugmasini bosasiz. Bot rasm orqa fonini olib tashlab, shaxsiy stiker konturini chizib beradi!\n\n"
+            "2️⃣ <b>Emoji tanlash va To‘plamga qo‘shish:</b>\n"
+            "Stikeringizga mos keladigan emojini tanlaysiz (masalan 🔥, 😎, 👍) va <b>➕ Stikerlar to‘plamiga qo‘shish</b> tugmasini bosasiz. Telegramda shaxsiy to‘plamingizga qo‘shiladi.\n\n"
             "3️⃣ <b>Ovozli stikerlar (Sound Stickers):</b>\n"
-            "Stiker yaratgach, unga o‘z ovozingizni (Voice) qo‘shasiz. Keyinchalik birgina tugma bilan stiker va uning ovozi do‘stlaringizga birgalikda yuboriladi!\n\n"
-            "4️⃣ <b>Shaxsiy Sticker Pack:</b>\n"
-            "Stikerni to‘plamga qo‘shganingizda, Telegramda shaxsiy to‘plam havolasi hosil bo‘ladi (masalan <code>t.me/addstickers/...</code>). Uni xohlagan odam Telegramiga o‘rnatib oladi!"
+            "Stikerga <b>🎙️ Ovoz biriktirish</b> orqali ovozli xabar qo‘shasiz. Keyin bir bosishda ham stiker, ham ovoz birga jo‘natiladi!\n\n"
+            "4️⃣ <b>GIF stikerlar:</b>\n"
+            "Rasmingizga pulsatsiya yoki aylanish harakati qo‘shiladi."
         )
         kb = {"inline_keyboard": [[{"text": "⬅️ Stiker menyusi", "callback_data": "stk_menu"}]]}
         send_message_fn(chat_id, help_text, kb, parse_mode="HTML")
