@@ -39,8 +39,7 @@ if [ "$UPDATED" -eq 0 ]; then
     echo "📡 Repositoriyadan to'g'ridan-to'g'ri yangilanishlar yuklanmoqda: $REPO_URL ..."
     TMP_DIR=$(mktemp -d)
     if git clone --depth 1 "$REPO_URL" "$TMP_DIR" 2>/dev/null; then
-        cp -r "$TMP_DIR/toyona" . 2>/dev/null
-        cp "$TMP_DIR/toyona_manager.py" . 2>/dev/null
+        cp "$TMP_DIR/sticker_manager.py" . 2>/dev/null
         cp "$TMP_DIR/bot.py" . 2>/dev/null
         cp "$TMP_DIR/requirements.txt" . 2>/dev/null
         cp "$TMP_DIR/setup.sh" . 2>/dev/null
@@ -99,17 +98,12 @@ echo "📦 Kutubxonalar tekshirilmoqda..."
 if [ -f "requirements.txt" ]; then
     pip install -r requirements.txt --upgrade > /dev/null 2>&1
 else
-    pip install --upgrade requests python-dotenv telethon rapidfuzz > /dev/null 2>&1
-fi
-
-if [ -d "toyona" ] && [ -f "toyona/package.json" ]; then
-    echo "📦 To‘yona Mini App kutubxonalari tekshirilmoqda..."
-    (cd toyona && npm install --silent > /dev/null 2>&1)
+    pip install --upgrade requests python-dotenv telethon rapidfuzz Pillow > /dev/null 2>&1
 fi
 
 # 6. Sintaksis va xavfsizlik tekshiruvi:
 echo "🔍 Kod tekshirilmoqda..."
-if python -m py_compile bot.py toyona_manager.py 2>/dev/null; then
+if python -m py_compile bot.py sticker_manager.py 2>/dev/null; then
     echo "✅ Sintaksis tekshiruvidan muvaffaqiyatli o'tdi!"
 else
     echo "⚠️ Diqqat: fayllarda xatolik aniqlandi."

@@ -327,11 +327,6 @@ def build_menu_keyboard():
     enabled = is_autoreply_enabled()
     mode = get_filter_mode()
     mode_label = {"all": "Hammaga", "only": "Faqat tanlanganlarga", "except": "Tanlanganlardan tashqari"}.get(mode, "Hammaga")
-    webapp_url = os.getenv("TOYONA_WEBAPP_URL", "").strip()
-    if webapp_url:
-        toyona_btn = [{"text": "💒 To‘yona hisobi (Mini App)", "web_app": {"url": webapp_url}}]
-    else:
-        toyona_btn = [{"text": "💒 To‘yona hisobi", "callback_data": "toyona_info"}]
 
     return {
         "inline_keyboard": [
@@ -340,7 +335,6 @@ def build_menu_keyboard():
                 {"text": ("\u2705 " if enabled else "") + "\U0001f534 Men oflaynman", "callback_data": "set_offline"}
             ],
             [{"text": f"\U0001f3af Filtr: {mode_label}", "callback_data": "open_filter"}],
-            toyona_btn,
             [{"text": "🎨 Stiker bo‘limi (Sticker maker)", "callback_data": "stk_menu"}],
             [
                 {"text": "⚙️ Telegram sozlamalari", "callback_data": "open_tg_settings"}
@@ -2782,71 +2776,6 @@ async def handle_callback(callback_query):
         )
         return
 
-    if data == "toyona_info":
-        from toyona_manager import get_toyona_webapp_url
-        webapp_url = get_toyona_webapp_url()
-        kb = {"inline_keyboard": []}
-        if webapp_url:
-            direct_url = f"{webapp_url}?key=orifxon"
-            msg_text = (
-                "💒 <b>To‘yona Mini App</b>\n\n"
-                f"📱 <b>Telegram Mini App:</b> pastdagi tugmani bosing\n"
-                f"🌐 <b>Har qanday telefon/brauzer uchun havola:</b>\n"
-                f"<code>{direct_url}</code>\n\n"
-                "<i>(Ushbu havolani istalgan telefonda Chrome yoki Safari orqali ochishingiz mumkin, Telegram shart emas!)</i>"
-            )
-            kb["inline_keyboard"].append([{"text": "🚀 Mini App’ni ochish (Telegramda)", "web_app": {"url": webapp_url}}])
-            kb["inline_keyboard"].append([{"text": "🌐 Brauzerda ochish (Har qanday telefon)", "url": direct_url}])
-        else:
-            msg_text = (
-                "💒 <b>To‘yona Mini App</b>\n\n"
-                "⏳ <i>Cloudflare tunnel ulanmoqda, iltimos bir necha soniya kuting...</i>"
-            )
-            kb["inline_keyboard"].append([{"text": "🔄 Qayta tekshirish", "callback_data": "toyona_info"}])
-
-        kb["inline_keyboard"].append([{"text": "📊 Hisobotni olish (Excel/CSV)", "callback_data": "toyona_get_report"}])
-        kb["inline_keyboard"].append([{"text": "💾 Zaxira nusxasini olish (Backup)", "callback_data": "toyona_do_backup"}])
-        kb["inline_keyboard"].append([{"text": "⬅️ Bosh menyu", "callback_data": "open_menu"}])
-        send_message(chat_id, msg_text, kb, parse_mode="HTML")
-        return
-
-    if data == "toyona_get_report":
-        send_message(chat_id, "⏳ To‘yona hisoboti tayyorlanmoqda va Excel/CSV fayl shaklida yuborilmoqda...")
-        from toyona_manager import generate_and_send_toyona_report
-        ok, err = generate_and_send_toyona_report(chat_id)
-        if not ok:
-            send_message(chat_id, f"❌ Hisobot yuborishda xatolik yuz berdi: {err}")
-        return
-
-    if data == "toyona_do_backup":
-        send_message(chat_id, "⏳ Neon bazasidan barcha to‘yona ma'lumotlari zaxiralanmoqda...")
-        from toyona_manager import export_toyona_data, send_file_to_telegram
-        from datetime import datetime
-        data_json, err = export_toyona_data()
-        if err:
-            send_message(chat_id, f"❌ Zaxira olishda xatolik yuz berdi:\n<code>{err}</code>", parse_mode="HTML")
-            return
-        
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        tmp_json = f"toyona_backup_{ts}.json"
-        with open(tmp_json, "w", encoding="utf-8") as f:
-            json.dump(data_json, f, ensure_ascii=False, indent=2)
-        
-        caption = (
-            f"✅ <b>To‘yona Bazasi To‘liq Zaxirasi</b>\n\n"
-            f"📅 <b>Vaqt:</b> {data_json.get('backup_date')}\n"
-            f"☁️ <b>Manba:</b> Neon.tech PostgreSQL\n"
-            f"👥 <b>Oshnalar:</b> {data_json['stats']['total_friends']} ta\n"
-            f"🎉 <b>To‘ylar:</b> {data_json['stats']['total_weddings']} ta\n"
-            f"🎁 <b>To‘yonalar:</b> {data_json['stats']['total_gifts']} ta\n\n"
-            f"<i>Ushbu JSON fayl orqali bazangizni istalgan payt 1 soniyada qayta tiklashingiz mumkin.</i>"
-        )
-        send_file_to_telegram(chat_id, tmp_json, caption=caption)
-        try:
-            os.remove(tmp_json)
-        except Exception:
-            pass
-        return
 
     if data == "set_online":
         set_autoreply(False)
@@ -3256,27 +3185,8 @@ async def bot_polling_loop():
                     text = msg.get("text", "")
 
                     if chat_id != ADMIN_ID:
-                        normalized = text.strip().lower()
-                        cmd_word = normalized.split()[0].split("@")[0] if normalized else ""
-                        if cmd_word in ["/start", "/toyona", "toyona", "/menyu", "menyu", "/menu"]:
-                            kb = {
-                                "inline_keyboard": [
-                                    [{"text": "💒 To‘yona daftarchasini ochish", "web_app": {"url": "https://assistant-nu-nine.vercel.app"}}],
-                                    [{"text": "🌐 Brauzerda ochish", "url": "https://assistant-nu-nine.vercel.app"}]
-                                ]
-                            }
-                            send_message(
-                                chat_id,
-                                "👋 <b>Assalomu alaykum!</b>\n\n"
-                                "💒 <b>To‘yona hisobi</b> — to‘yona, oshnalar va hisob-kitoblar daftarchangizga xush kelibsiz.\n\n"
-                                "O‘z shaxsiy daftarchangizni ochish uchun quyidagi tugmani bosing:",
-                                kb,
-                                parse_mode="HTML"
-                            )
-                            continue
-
                         print(f"RAD ETILDI (admin emas): {chat_id} -> {text}")
-                        send_message(chat_id, "Kechirasiz, sun'iy intellekt yordamchisi faqat bot egasi uchun ishlaydi.\n\nTo‘yona hisob-kitob daftarchasini ochish uchun /toyona buyrug‘ini yuboring.")
+                        send_message(chat_id, "Kechirasiz, ushbu bot shaxsiy yordamchi bo‘lib, faqat bot egasi uchun xizmat ko‘rsatadi.")
                         continue
 
                     
@@ -3316,71 +3226,6 @@ async def bot_polling_loop():
                             send_message(chat_id, f"⚠️ Stiker bo‘limini ochishda xatolik:\n<code>{e}</code>", parse_mode="HTML")
                         continue
 
-                    if cmd_word in ["/toyona", "toyona"]:
-                        from toyona_manager import get_toyona_webapp_url
-                        webapp_url = get_toyona_webapp_url()
-                        kb = {"inline_keyboard": []}
-                        if webapp_url:
-                            direct_url = f"{webapp_url}?key=orifxon"
-                            msg_text = (
-                                "💒 <b>To‘yona Mini App</b>\n\n"
-                                f"📱 <b>Telegram Mini App:</b> pastdagi tugmani bosing\n"
-                                f"🌐 <b>Har qanday telefon/brauzer uchun havola:</b>\n"
-                                f"<code>{direct_url}</code>\n\n"
-                                "<i>(Ushbu havolani istalgan telefonda Chrome yoki Safari orqali ochishingiz mumkin, Telegram shart emas!)</i>"
-                            )
-                            kb["inline_keyboard"].append([{"text": "🚀 Mini App’ni ochish (Telegramda)", "web_app": {"url": webapp_url}}])
-                            kb["inline_keyboard"].append([{"text": "🌐 Brauzerda ochish (Har qanday telefon)", "url": direct_url}])
-                        else:
-                            msg_text = (
-                                "💒 <b>To‘yona Mini App</b>\n\n"
-                                "⏳ <i>Cloudflare tunnel ulanmoqda, iltimos bir necha soniya kuting...</i>"
-                            )
-                            kb["inline_keyboard"].append([{"text": "🔄 Qayta tekshirish", "callback_data": "toyona_info"}])
-
-                        kb["inline_keyboard"].append([{"text": "📊 Hisobotni olish (Excel/CSV)", "callback_data": "toyona_get_report"}])
-                        kb["inline_keyboard"].append([{"text": "💾 Zaxira nusxasini olish (Backup)", "callback_data": "toyona_do_backup"}])
-                        kb["inline_keyboard"].append([{"text": "⬅️ Bosh menyu", "callback_data": "open_menu"}])
-                        send_message(chat_id, msg_text, kb, parse_mode="HTML")
-                        continue
-
-                    if cmd_word in ["/toyona_report", "toyona_report", "/hisobot"]:
-                        send_message(chat_id, "⏳ To‘yona hisoboti tayyorlanmoqda va Excel/CSV fayl shaklida yuborilmoqda...")
-                        from toyona_manager import generate_and_send_toyona_report
-                        ok, err = generate_and_send_toyona_report(chat_id)
-                        if not ok:
-                            send_message(chat_id, f"❌ Hisobot yuborishda xatolik yuz berdi: {err}")
-                        continue
-
-                    if cmd_word in ["/toyona_backup", "toyona_backup", "/backup"]:
-                        send_message(chat_id, "⏳ Neon bazasidan barcha to‘yona ma'lumotlari zaxiralanmoqda...")
-                        from toyona_manager import export_toyona_data, send_file_to_telegram
-                        from datetime import datetime
-                        data_json, err = export_toyona_data()
-                        if err:
-                            send_message(chat_id, f"❌ Zaxira olishda xatolik yuz berdi:\n<code>{err}</code>", parse_mode="HTML")
-                            continue
-                        
-                        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-                        tmp_json = f"toyona_backup_{ts}.json"
-                        with open(tmp_json, "w", encoding="utf-8") as f:
-                            json.dump(data_json, f, ensure_ascii=False, indent=2)
-                        
-                        caption = (
-                            f"✅ <b>To‘yona Bazasi To‘liq Zaxirasi</b>\n\n"
-                            f"📅 <b>Vaqt:</b> {data_json.get('backup_date')}\n"
-                            f"☁️ <b>Manba:</b> Neon.tech PostgreSQL\n"
-                            f"👥 <b>Oshnalar:</b> {data_json['stats']['total_friends']} ta\n"
-                            f"🎉 <b>To‘ylar:</b> {data_json['stats']['total_weddings']} ta\n"
-                            f"🎁 <b>To‘yonalar:</b> {data_json['stats']['total_gifts']} ta\n\n"
-                            f"<i>Ushbu JSON fayl orqali bazangizni istalgan payt 1 soniyada qayta tiklashingiz mumkin.</i>"
-                        )
-                        send_file_to_telegram(chat_id, tmp_json, caption=caption)
-                        try:
-                            os.remove(tmp_json)
-                        except Exception:
-                            pass
-                        continue
 
                     pending = pending_actions.get(chat_id)
                     if pending and pending.get("type") == "awaiting_filter_names":
@@ -3575,12 +3420,6 @@ async def main():
     except Exception:
         pass
 
-    # Start Toyona server if present
-    try:
-        from toyona_manager import start_toyona_server
-        asyncio.create_task(start_toyona_server())
-    except Exception as te:
-        print("[TOYONA START ERROR]:", te)
 
     await asyncio.gather(
         bot_polling_loop(),

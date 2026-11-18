@@ -23,12 +23,9 @@ action_history.json
 *.bak
 .update_backup/
 
-# Node.js & Mini App
+# Node.js
 node_modules/
-toyona/node_modules/
 package-lock.json
-toyona/package-lock.json
-toyona_backup_*.json
 
 # Local scratch / test utilities
 upload_to_github.py

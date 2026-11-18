@@ -15,12 +15,7 @@ pip install --upgrade pip
 if [ -f "requirements.txt" ]; then
     pip install -r requirements.txt
 else
-    pip install requests python-dotenv telethon rapidfuzz psycopg2-binary
-fi
-
-if [ -d "toyona" ] && [ -f "toyona/package.json" ]; then
-    echo "📦 To‘yona Mini App kutubxonalari o'rnatilmoqda..."
-    (cd toyona && npm install --silent)
+    pip install requests python-dotenv telethon rapidfuzz Pillow
 fi
 
 echo ""
@@ -52,7 +47,6 @@ done
 read -p "Telegram API Hash (my.telegram.org): " API_HASH
 read -p "Ismingiz (masalan: Rustam) [standart: Telegram profilingizdan olinadi]: " OWNER_NAME
 OWNER_NAME=${OWNER_NAME:-Foydalanuvchi}
-read -p "To‘yona Neon Database URL (bo'sh qoldirsangiz keyin .env ga kiritishingiz mumkin): " TOYONA_DB_URL
 
 
 cat > .env << ENVEOF
@@ -63,9 +57,6 @@ TELEGRAM_API_HASH=$API_HASH
 ADMIN_ID=$ADMIN_ID
 OWNER_NAME=$OWNER_NAME
 SESSION_NAME=jarvis_session
-TOYONA_PORT=3000
-TOYONA_DATABASE_URL=$TOYONA_DB_URL
-TOYONA_WEBAPP_URL=
 ENVEOF
 
 echo ""
