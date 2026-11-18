@@ -3,8 +3,15 @@ import io
 import json
 import time
 import requests
-import cv2
-import numpy as np
+try:
+    import cv2
+    import numpy as np
+    HAS_CV2 = True
+except ImportError:
+    cv2 = None
+    np = None
+    HAS_CV2 = False
+
 from PIL import Image, ImageDraw, ImageOps, ImageFilter
 
 STICKERS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stickers")
@@ -89,7 +96,7 @@ def add_white_contour_to_cutout(cutout_rgba, contour_width=12):
 
     # 512x512 kvadrat kanvasga markazlashtirib joylash
     canvas = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
-    canvas.paste(stk, ((512 - cw) // 2, (512 - ch) // 2))
+    canvas.paste(stk, ((512 - cw) // 2, (512 - ch) // 2), stk)
 
     return canvas
 
@@ -97,30 +104,79 @@ def make_auto_cutout_with_contour(img_bytes, contour_width=12):
     """
     Rasmdan ob'yektni avtomatik qirqib oladi (fondan ajratadi) va
     oq kontur (sticker outline) qo'shib 512x512 stiker yasaydi.
+    Agar OpenCV mavjud bo'lsa GrabCut ishlatadi, aks holda 100% toza Pillow
+    yordamida fonni tozalaydi va kontur chizadi (Termux bilan to'liq mos).
     """
-    img_pil = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-    cv_img = np.array(img_pil)
-    h, w = cv_img.shape[:2]
+    orig_img = Image.open(io.BytesIO(img_bytes))
 
-    # GrabCut yordamida markaziy ob'yektni ajratish
-    margin_x = max(8, int(w * 0.05))
-    margin_y = max(8, int(h * 0.05))
-    rect = (margin_x, margin_y, w - 2 * margin_x, h - 2 * margin_y)
+    # 1. Agar rasmda shaffoflik (alpha) allaqachon mavjud bo'lsa (PNG/WEBP):
+    if orig_img.mode in ("RGBA", "LA") or (orig_img.mode == "P" and "transparency" in orig_img.info):
+        img_rgba = orig_img.convert("RGBA")
+        alpha = img_rgba.split()[-1]
+        extrema = alpha.getextrema()
+        if extrema and extrema[0] < 200:
+            canvas = add_white_contour_to_cutout(img_rgba, contour_width=contour_width)
+            webp_io = io.BytesIO()
+            canvas.save(webp_io, format="WEBP", quality=95)
+            png_io = io.BytesIO()
+            canvas.save(png_io, format="PNG")
+            return webp_io.getvalue(), png_io.getvalue()
 
-    mask = np.zeros((h, w), np.uint8)
-    bgdModel = np.zeros((1, 65), np.float64)
-    fgdModel = np.zeros((1, 65), np.float64)
+    # 2. Agar OpenCV va numpy o'rnatilgan bo'lsa, GrabCut sinab ko'ramiz:
+    cutout = None
+    if HAS_CV2 and cv2 is not None and np is not None:
+        try:
+            img_rgb = orig_img.convert("RGB")
+            cv_img = np.array(img_rgb)
+            h, w = cv_img.shape[:2]
+            margin_x = max(8, int(w * 0.05))
+            margin_y = max(8, int(h * 0.05))
+            rect = (margin_x, margin_y, w - 2 * margin_x, h - 2 * margin_y)
 
-    try:
-        cv2.grabCut(cv_img, mask, rect, bgdModel, fgdModel, 3, cv2.GC_INIT_WITH_RECT)
-        mask2 = np.where((mask == 2) | (mask == 0), 0, 255).astype("uint8")
-        mask_pil = Image.fromarray(mask2).filter(ImageFilter.GaussianBlur(1))
-    except Exception as e:
-        print("[GRABCUT FALLBACK]:", e)
-        mask_pil = Image.new("L", (w, h), 255)
+            mask = np.zeros((h, w), np.uint8)
+            bgdModel = np.zeros((1, 65), np.float64)
+            fgdModel = np.zeros((1, 65), np.float64)
 
-    cutout = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    cutout.paste(img_pil.convert("RGBA"), (0, 0), mask_pil)
+            cv2.grabCut(cv_img, mask, rect, bgdModel, fgdModel, 3, cv2.GC_INIT_WITH_RECT)
+            mask2 = np.where((mask == 2) | (mask == 0), 0, 255).astype("uint8")
+            mask_pil = Image.fromarray(mask2).filter(ImageFilter.GaussianBlur(1))
+
+            cutout_cand = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            cutout_cand.paste(img_rgb.convert("RGBA"), (0, 0), mask_pil)
+            alpha_cand = cutout_cand.split()[-1]
+            if alpha_cand.getextrema() == (0, 255):
+                cutout = cutout_cand
+        except Exception as e:
+            print("[GRABCUT FALLBACK]:", e)
+            cutout = None
+
+    # 3. Agar GrabCut ishlamasa yoki OpenCV yo'q bo'lsa, Pillow yordamida tozalash:
+    if cutout is None:
+        img_rgba = orig_img.convert("RGBA")
+        w, h = img_rgba.size
+
+        # Burchaklardan floodfill orqali bir xil fonni yo'qotishga urinish
+        flood_img = img_rgba.copy()
+        corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1), (w // 2, 0), (0, h // 2), (w - 1, h // 2)]
+        for pt in corners:
+            try:
+                if flood_img.getpixel(pt)[3] > 0:
+                    ImageDraw.floodfill(flood_img, pt, (0, 0, 0, 0), thresh=28)
+            except Exception:
+                pass
+
+        alpha_f = flood_img.split()[-1]
+        ext = alpha_f.getextrema()
+        if ext and ext[0] == 0 and ext[1] == 255:
+            cutout = flood_img
+        else:
+            # Murakkab fonli rasmlar uchun: Chiroyli oval/yumaloq konturli stiker ramkasi
+            mask = Image.new("L", (w, h), 0)
+            mdraw = ImageDraw.Draw(mask)
+            rad = int(min(w, h) * 0.16)
+            mdraw.rounded_rectangle((int(w * 0.02), int(h * 0.02), int(w * 0.98), int(h * 0.98)), radius=rad, fill=255)
+            cutout = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            cutout.paste(img_rgba, (0, 0), mask)
 
     canvas = add_white_contour_to_cutout(cutout, contour_width=contour_width)
 
@@ -183,14 +239,14 @@ def convert_to_sticker(image_bytes, style="cutout"):
         bcanvas.paste(img, (10, 10), mask)
 
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        canvas.paste(bcanvas, ((size - bw) // 2, ((size - bh) // 2)))
+        canvas.paste(bcanvas, ((size - bw) // 2, ((size - bh) // 2)), bcanvas)
         final_img = canvas
 
     else:
         # Standard fit
         img.thumbnail((size, size), Image.Resampling.LANCZOS)
         canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-        canvas.paste(img, ((size - img.width) // 2, ((size - img.height) // 2)))
+        canvas.paste(img, ((size - img.width) // 2, ((size - img.height) // 2)), img)
         final_img = canvas
 
     webp_io = io.BytesIO()
@@ -214,7 +270,7 @@ def convert_to_gif(image_bytes, anim_type="pulse"):
             nw, nh = int(base.width * s), int(base.height * s)
             resized = base.resize((nw, nh), Image.Resampling.LANCZOS)
             canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-            canvas.paste(resized, ((size - nw) // 2, (size - nh) // 2))
+            canvas.paste(resized, ((size - nw) // 2, (size - nh) // 2), resized)
             frames.append(canvas)
 
     elif anim_type == "shake":
@@ -222,7 +278,7 @@ def convert_to_gif(image_bytes, anim_type="pulse"):
         for a in angles:
             rot = base.rotate(a, resample=Image.Resampling.BICUBIC, expand=False)
             canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-            canvas.paste(rot, ((size - rot.width) // 2, (size - rot.height) // 2))
+            canvas.paste(rot, ((size - rot.width) // 2, (size - rot.height) // 2), rot)
             frames.append(canvas)
 
     elif anim_type == "spin":
@@ -230,7 +286,7 @@ def convert_to_gif(image_bytes, anim_type="pulse"):
             deg = i * 30
             rot = base.rotate(-deg, resample=Image.Resampling.BICUBIC, expand=False)
             canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-            canvas.paste(rot, ((size - rot.width) // 2, (size - rot.height) // 2))
+            canvas.paste(rot, ((size - rot.width) // 2, (size - rot.height) // 2), rot)
             frames.append(canvas)
 
     elif anim_type == "heartbeat":
@@ -239,7 +295,7 @@ def convert_to_gif(image_bytes, anim_type="pulse"):
             nw, nh = int(base.width * s), int(base.height * s)
             resized = base.resize((nw, nh), Image.Resampling.LANCZOS)
             canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-            canvas.paste(resized, ((size - nw) // 2, (size - nh) // 2))
+            canvas.paste(resized, ((size - nw) // 2, (size - nh) // 2), resized)
             frames.append(canvas)
 
     out = io.BytesIO()
@@ -591,7 +647,7 @@ def send_sticker_main_menu(chat_id, send_message_fn):
     pack_title = data.get("pack_title", "Orifxon Stikerlari")
     pack_url = data.get("pack_url")
 
-    pack_info = f"<a href='{pack_url}'>{pack_title}</a>" if pack_url else f"<b>{pack_title}</b> (Hali yaratilmagan)"
+    pack_info = f"<a href='{pack_url}'>{pack_title}</a>" if (pack_url and str(pack_url).startswith("http")) else f"<b>{pack_title}</b> (Hali yaratilmagan)"
 
     text = (
         "🎨 <b>Stiker Ustaxonasi (Sticker Studio)</b>\n\n"

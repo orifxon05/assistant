@@ -2733,17 +2733,21 @@ async def handle_callback(callback_query):
     answer_callback(callback_query["id"])
 
     if data.startswith("stk_"):
-        from sticker_manager import handle_sticker_callback
-        bot_username = os.getenv("BOT_USERNAME", "Orifxon_assistantbot")
-        await handle_sticker_callback(
-            chat_id=chat_id,
-            data=data,
-            callback_query=callback_query,
-            send_message_fn=send_message,
-            pending_actions=pending_actions,
-            bot_username=bot_username,
-            bot_token=TELEGRAM_TOKEN
-        )
+        try:
+            from sticker_manager import handle_sticker_callback
+            bot_username = os.getenv("BOT_USERNAME", "Orifxon_assistantbot")
+            await handle_sticker_callback(
+                chat_id=chat_id,
+                data=data,
+                callback_query=callback_query,
+                send_message_fn=send_message,
+                pending_actions=pending_actions,
+                bot_username=bot_username,
+                bot_token=TELEGRAM_TOKEN
+            )
+        except Exception as e:
+            print(f"[STICKER CALLBACK ERROR]: {e}")
+            send_message(chat_id, f"⚠️ Stiker bo‘limida xatolik yuz berdi:\n<code>{e}</code>", parse_mode="HTML")
         return
 
     if data == "confirm_profile_photo":
@@ -3304,8 +3308,12 @@ async def bot_polling_loop():
                         continue
 
                     if cmd_word in ["/stiker", "/sticker", "stiker", "sticker", "/stikerlar", "stikerlar"]:
-                        from sticker_manager import send_sticker_main_menu
-                        send_sticker_main_menu(chat_id, send_message)
+                        try:
+                            from sticker_manager import send_sticker_main_menu
+                            send_sticker_main_menu(chat_id, send_message)
+                        except Exception as e:
+                            print(f"[STICKER CMD ERROR]: {e}")
+                            send_message(chat_id, f"⚠️ Stiker bo‘limini ochishda xatolik:\n<code>{e}</code>", parse_mode="HTML")
                         continue
 
                     if cmd_word in ["/toyona", "toyona"]:
